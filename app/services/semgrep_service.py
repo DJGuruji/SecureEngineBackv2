@@ -12,15 +12,25 @@ logger = logging.getLogger(__name__)
 def run_semgrep(file_path: str, custom_rule: Optional[str] = None) -> List[Dict]:
     """Run semgrep on a file or directory and return results."""
     try:
-        logger.info(f"Running semgrep on {file_path}")
+        # Check if it's a directory or file
+        is_directory = os.path.isdir(file_path)
+        logger.info(f"Running semgrep on {'directory' if is_directory else 'file'}: {file_path}")
         
-        # Log file content for debugging
-        try:
-            with open(file_path, 'r') as f:
-                file_content = f.read()
-                logger.info(f"File content:\n{file_content}")
-        except Exception as e:
-            logger.warning(f"Could not read file content: {str(e)}")
+        # Log file content for debugging (only for single files, not directories)
+        if not is_directory:
+            try:
+                with open(file_path, 'r') as f:
+                    file_content = f.read()
+                    logger.info(f"File content:\n{file_content}")
+            except Exception as e:
+                logger.warning(f"Could not read file content: {str(e)}")
+        else:
+            # Log directory structure for debugging
+            logger.info("Directory structure:")
+            for root, dirs, files in os.walk(file_path):
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), file_path)
+                    logger.info(f"- {rel_path}")
         
         # Base command
         cmd = ["semgrep", "--json", "--verbose"]
@@ -94,12 +104,13 @@ def run_semgrep(file_path: str, custom_rule: Optional[str] = None) -> List[Dict]
             cmd.extend(["--config", "auto"])
             logger.info("Using default auto config")
         
-        # Add target file
+        # Add target file or directory
         cmd.append(file_path)
         logger.info(f"Full semgrep command: {' '.join(cmd)}")
         
-        # Run semgrep
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Run semgrep with a longer timeout for directories or larger files
+        timeout = 300 if is_directory else 60
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         
         # Clean up temporary rule file if it exists
         if custom_rule and 'temp_rule_path' in locals():
