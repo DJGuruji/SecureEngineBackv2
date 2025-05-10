@@ -952,6 +952,7 @@ async def shiftleft_scan(file: UploadFile = File(...)):
                     logger.info(f"  - Low: {counts['low']} (will be mapped to INFO)")
                 
                 # Add findings from all tools in the summary
+                
                 for tool, counts in findings_summary.items():
                     tool_name = tool.strip()  # Ensure no whitespace issues
                     logger.info(f"Processing findings for tool: '{tool_name}'")
