@@ -1530,11 +1530,12 @@ def simulate_exploit_db_details(exploit_id: str):
 async def get_semgrep_rules(
     query: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    severity: Optional[str] = Query(None)
 ):
     """Fetch Semgrep rules from the registry."""
     try:
-        rules = fetch_semgrep_rules(query, limit, offset)
+        rules = fetch_semgrep_rules(query, limit, offset, severity)
         return rules
     except ValueError as e:
         logger.error(f"Error fetching semgrep rules: {str(e)}")

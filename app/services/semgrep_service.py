@@ -11,10 +11,10 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: int = 0) -> Dict:
+def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: int = 0, severity: Optional[str] = None) -> Dict:
     """Fetch rules from Semgrep Registry with pagination support."""
     try:
-        logger.info(f"Fetching semgrep rules with query: {query}, limit: {limit}, offset: {offset}")
+        logger.info(f"Fetching semgrep rules with query: {query}, limit: {limit}, offset: {offset}, severity: {severity}")
         
         # Base URL for the Semgrep Registry API
         api_url = "https://semgrep.dev/api/registry/rules"
@@ -136,6 +136,15 @@ def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: in
                        any(query_lower in lang.lower() for lang in rule.get("languages", []))
                 ]
                 logger.info(f"Filtered rules by query '{query}': {len(filtered_rules)} of {len(rules)} match")
+            
+            # Apply server-side filtering for severity if provided
+            if severity:
+                severity_lower = severity.lower()
+                filtered_rules = [
+                    rule for rule in filtered_rules
+                    if rule.get("severity", "").lower() == severity_lower
+                ]
+                logger.info(f"Filtered rules by severity '{severity}': {len(filtered_rules)} of {len(rules)} match")
             
             # Apply pagination
             total_rules = len(filtered_rules)
