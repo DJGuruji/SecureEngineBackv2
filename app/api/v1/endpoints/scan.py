@@ -1529,14 +1529,14 @@ def simulate_exploit_db_details(exploit_id: str):
 @router.get("/semgrep-rules")
 async def get_semgrep_rules(
     query: Optional[str] = Query(None),
-    limit: int = Query(50, gt=0, le=100),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0)
 ):
-    """Fetch rules from the semgrep registry with pagination."""
+    """Fetch Semgrep rules from the registry."""
     try:
-        rules_data = fetch_semgrep_rules(query, limit, offset)
-        return rules_data
-    except Exception as e:
+        rules = fetch_semgrep_rules(query, limit, offset)
+        return rules
+    except ValueError as e:
         logger.error(f"Error fetching semgrep rules: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -43,33 +43,132 @@ def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: in
         # API returns a list of rules
         if isinstance(rules_data, list):
             rules = []
+            logger.info(f"Processing {len(rules_data)} rules from list response")
+            
+            # Add debug logging for the first few rules to understand structure
+            for i, rule in enumerate(rules_data[:5]):  # Log first 5 rules
+                logger.info(f"Rule {i+1} details:")
+                logger.info(f"  ID: {rule.get('id', 'NOT PROVIDED')}")
+                logger.info(f"  Name: {rule.get('name', 'NOT PROVIDED')}")
+                logger.info(f"  Description length: {len(str(rule.get('description', '')))}")
+                logger.info(f"  Path: {rule.get('path', 'NOT PROVIDED')}")
+                
+                # Log languages with special attention
+                languages = rule.get('languages', [])
+                if languages:
+                    if isinstance(languages, list):
+                        logger.info(f"  Languages: {', '.join(languages)}")
+                        
+                        # Check for specific languages of interest
+                        language_checks = {
+                            "python": "Python",
+                            "javascript": "JavaScript", 
+                            "typescript": "TypeScript",
+                            "java": "Java", 
+                            "go": "Go",
+                            "ruby": "Ruby",
+                            "c": "C",
+                            "cpp": "C++",
+                            "csharp": "C#"
+                        }
+                        
+                        found_languages = []
+                        for lang_key, lang_name in language_checks.items():
+                            if lang_key in [l.lower() for l in languages]:
+                                found_languages.append(lang_name)
+                        
+                        if found_languages:
+                            logger.info(f"  Recognized languages: {', '.join(found_languages)}")
+                        else:
+                            logger.info("  No recognized mainstream languages found")
+                    else:
+                        logger.info(f"  Languages (non-list): {languages}")
+                else:
+                    logger.info("  Languages: NONE")
+                
+                # Log category info
+                logger.info(f"  Category: {rule.get('category', 'NOT PROVIDED')}")
+                logger.info(f"  Severity: {rule.get('severity', 'NOT PROVIDED')}")
+                
+                # Log all keys to see what other data might be available
+                logger.info(f"  All keys: {', '.join(rule.keys())}")
+            
             # Process each rule in the list
             for rule in rules_data:
+                # Only skip rules with no ID - allow other fields to be missing
+                if not rule.get("id"):
+                    logger.warning("Skipping rule with missing ID")
+                    continue
+                    
                 formatted_rule = {
                     "id": rule.get("id", ""),
-                    "name": rule.get("name", ""),
-                    "description": rule.get("description", ""),
+                    "name": rule.get("name", "Unknown Rule"),
+                    "description": rule.get("description", "No description available"),
                     "category": rule.get("category", "Security"),
                     "languages": rule.get("languages", []),
-                    "severity": rule.get("severity", "WARNING")
+                    "severity": rule.get("severity", "WARNING"),
+                    "patterns": rule.get("patterns", []),
+                    "message": rule.get("message", ""),
+                    "metadata": rule.get("metadata", {}),
+                    "fix": rule.get("fix", ""),
+                    "fix_regex": rule.get("fix-regex", ""),
+                    "rule_id": rule.get("ruleid", ""),
+                    "tags": rule.get("tags", []),
+                    "mode": rule.get("mode", ""),
+                    "path": rule.get("path", ""),
+                    "source_uri": rule.get("source_uri", ""),
+                    "visibility": rule.get("visibility", ""),
+                    "meta": rule.get("meta", {})
                 }
                 rules.append(formatted_rule)
             
-            total_rules = len(rules)
-            # With a list response, we need to handle pagination manually
-            paginated_rules = rules[offset:offset + limit]
+            # Filter by query if provided
+            filtered_rules = rules
+            if query:
+                query_lower = query.lower()
+                filtered_rules = [
+                    rule for rule in rules 
+                    if query_lower in rule["id"].lower() or 
+                       query_lower in (rule["name"] or "").lower() or 
+                       query_lower in (rule["description"] or "").lower() or
+                       query_lower in (rule["path"] or "").lower() or  # Also search in the path
+                       (rule.get("category") and query_lower in rule["category"].lower()) or
+                       any(query_lower in lang.lower() for lang in rule.get("languages", []))
+                ]
+                logger.info(f"Filtered rules by query '{query}': {len(filtered_rules)} of {len(rules)} match")
+            
+            # Apply pagination
+            total_rules = len(filtered_rules)
+            paginated_rules = filtered_rules[offset:offset + limit]
             has_more = (offset + limit) < total_rules
         else:
             # Handle the case where the API returns a dictionary with results field
             rules = []
             for rule in rules_data.get("results", []):
+                # Only skip rules with no ID - allow other fields to be missing
+                if not rule.get("id"):
+                    logger.warning("Skipping rule with missing ID")
+                    continue
+                    
                 formatted_rule = {
                     "id": rule.get("id", ""),
-                    "name": rule.get("name", ""),
-                    "description": rule.get("description", ""),
+                    "name": rule.get("name", "Unknown Rule"),
+                    "description": rule.get("description", "No description available"),
                     "category": rule.get("category", "Security"),
                     "languages": rule.get("languages", []),
-                    "severity": rule.get("severity", "WARNING")
+                    "severity": rule.get("severity", "WARNING"),
+                    "patterns": rule.get("patterns", []),
+                    "message": rule.get("message", ""),
+                    "metadata": rule.get("metadata", {}),
+                    "fix": rule.get("fix", ""),
+                    "fix_regex": rule.get("fix-regex", ""),
+                    "rule_id": rule.get("ruleid", ""),
+                    "tags": rule.get("tags", []),
+                    "mode": rule.get("mode", ""),
+                    "path": rule.get("path", ""),
+                    "source_uri": rule.get("source_uri", ""),
+                    "visibility": rule.get("visibility", ""),
+                    "meta": rule.get("meta", {})
                 }
                 rules.append(formatted_rule)
             
@@ -79,8 +178,14 @@ def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: in
         
         logger.info(f"Retrieved {len(paginated_rules)} rules from Semgrep Registry, total={total_rules}, has_more={has_more}")
         
+        # Don't filter out incomplete rules - just ensure they have an ID
+        validRules = [rule for rule in paginated_rules if rule.get("id")]
+        
+        if len(validRules) < len(paginated_rules):
+            logger.warning(f"Filtered out {len(paginated_rules) - len(validRules)} rules with missing IDs")
+        
         return {
-            "rules": paginated_rules,
+            "rules": validRules,
             "total": total_rules,
             "has_more": has_more,
             "limit": limit,
@@ -123,6 +228,19 @@ def run_semgrep(file_path: str, custom_rule: Optional[str] = None) -> List[Dict]
                 # Check if this is a registry ID (no JSON markers)
                 if not custom_rule.startswith('{') and not custom_rule.endswith('}'):
                     registry_id = custom_rule.strip()
+                    
+                    # Log registry ID details for debugging
+                    logger.info(f"Registry ID details: '{registry_id}'")
+                    parts = registry_id.split('/')
+                    if len(parts) > 1:
+                        logger.info(f"  Registry namespace: {parts[0]}")
+                        logger.info(f"  Registry rule name: {'/'.join(parts[1:])}")
+                    if registry_id.startswith('p/'):
+                        logger.info("  This appears to be a ruleset pack")
+                    elif registry_id.startswith('r/'):
+                        logger.info("  This appears to be a rule reference")
+                    else:
+                        logger.info("  This appears to be a custom rule ID format")
                     
                     # Validate registry ID
                     if registry_id.startswith('p/') or registry_id.startswith('r/'):
