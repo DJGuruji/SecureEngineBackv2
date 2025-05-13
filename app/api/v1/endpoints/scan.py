@@ -1,11 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Form, Query
 import os
 import tempfile
 import shutil
 import logging
 import time
-from typing import Dict, Any, Optional
-from app.services.semgrep_service import run_semgrep
+from typing import Dict, Any, Optional, List
+from app.services.semgrep_service import run_semgrep, fetch_semgrep_rules
 from app.services.supabase_service import store_scan_results, get_scan_history, get_scan_by_id, delete_scan
 from app.core.security import calculate_security_score, count_severities
 from app.core.config import get_settings
@@ -1524,4 +1524,21 @@ def simulate_exploit_db_details(exploit_id: str):
         "notes": notes,
         "verified": True,
         "vulnerability_keywords": vulnerability_keywords
-    } 
+    }
+
+@router.get("/semgrep-rules")
+async def get_semgrep_rules(
+    query: Optional[str] = Query(None),
+    limit: int = Query(50, gt=0, le=100),
+    offset: int = Query(0, ge=0)
+):
+    """Fetch rules from the semgrep registry with pagination."""
+    try:
+        rules_data = fetch_semgrep_rules(query, limit, offset)
+        return rules_data
+    except Exception as e:
+        logger.error(f"Error fetching semgrep rules: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )

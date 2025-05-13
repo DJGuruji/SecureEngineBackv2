@@ -76,3 +76,4 @@ docker-compose.override.yml
 codeql
 
 codeql-linux64.zip.1
+codeql-linux64.zip
