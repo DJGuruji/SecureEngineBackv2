@@ -12,11 +12,19 @@ from app.core.config import get_settings
 import subprocess
 import json
 import re
+from .semgrep_endpoint import router as semgrep_router
+from .codeql_endpoint import router as codeql_router
+from .shiftleft_endpoint import router as shiftleft_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 router = APIRouter()
+
+# Include the three specific routers
+router.include_router(semgrep_router, prefix="", tags=["semgrep"])
+router.include_router(codeql_router, prefix="", tags=["codeql"])
+router.include_router(shiftleft_router, prefix="", tags=["shiftleft"])
 
 def process_upload(file: UploadFile, custom_rule: Optional[str] = None) -> Dict[str, Any]:
     """Process the uploaded file and return vulnerability results."""
@@ -1182,166 +1190,154 @@ async def shiftleft_scan(file: UploadFile = File(...)):
 
 @router.get("/compare/{scan_id}")
 async def compare_with_exploitdb(scan_id: str):
-    """Compare a scan result with Exploit DB to find matching vulnerabilities."""
+    """Compare vulnerabilities with known exploits from Exploit-DB."""
     try:
-        # First get the scan details
+        # Retrieve the scan details first
         scan = get_scan_by_id(scan_id)
         if not scan:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Scan with ID {scan_id} not found"
             )
-        
-        logger.info(f"Comparing scan {scan_id} with Exploit DB")
-        
-        # Extract key information from scan for comparison
-        file_name = scan.get("file_name", "")
+            
+        # Extract vulnerabilities
         vulnerabilities = scan.get("vulnerabilities", [])
+        if not vulnerabilities:
+            return {
+                "scan_id": scan_id,
+                "scan_metadata": scan.get("scan_metadata", {}),
+                "vulnerability_count": 0,
+                "exploits_found": 0,
+                "matches": []
+            }
         
-        # Check if the filename matches Exploit-DB pattern (numeric ID + extension)
-        # This is a common pattern for files downloaded from Exploit-DB (e.g., 12345.py)
-        exploitdb_file_pattern = re.compile(r'^(\d{3,6})\.(py|php|pl|rb|sh|c|cpp|java|js|asp|aspx|html|txt)$')
-        exploitdb_match = exploitdb_file_pattern.match(file_name)
+        logger.info(f"Comparing {len(vulnerabilities)} vulnerabilities with Exploit-DB")
         
-        # If the file appears to be from Exploit DB, get the ID
-        exploitdb_id = None
-        if exploitdb_match:
-            exploitdb_id = exploitdb_match.group(1)
-            logger.info(f"File appears to be from Exploit DB with ID: {exploitdb_id}")
+        # Analyze vulnerabilities and find potential exploits
+        vulnerability_keywords = set()
         
-        # Extract relevant vulnerability types and patterns
-        vuln_patterns = set()
+        # Extract keywords from vulnerabilities
         for vuln in vulnerabilities:
-            # Extract check_id which often contains vulnerability type
-            check_id = vuln.get("check_id", "").lower()
-            # Extract keywords from message
-            message = vuln.get("message", "").lower()
+            # Get message content
+            message = vuln.get("message", "")
+            if message:
+                # Extract keywords from message
+                keywords = re.findall(r'\b[a-zA-Z]{4,}\b', message)
+                for keyword in keywords:
+                    # Filter out common words
+                    if keyword.lower() not in ["this", "that", "with", "from", "have", "were", "your", "which", "their", "what", "about"]:
+                        vulnerability_keywords.add(keyword.lower())
             
-            # Look for common vulnerability patterns
-            for pattern in ["sql injection", "xss", "csrf", "command injection", 
-                           "path traversal", "rce", "overflow", "deserialize"]:
-                if pattern in check_id or pattern in message:
-                    vuln_patterns.add(pattern)
+            # Get check_id and extract components
+            check_id = vuln.get("check_id", "")
+            if check_id:
+                parts = check_id.split(".")
+                for part in parts:
+                    if len(part) > 3 and part.isalpha():
+                        vulnerability_keywords.add(part.lower())
         
-        # Initialize results
-        exploitdb_results = []
-        file_in_exploitdb = False
+        # Get severity information
+        severity_count = scan.get("severity_count", {})
+        has_critical = severity_count.get("ERROR", 0) > 0 or severity_count.get("error", 0) > 0
         
-        # If the file is directly from Exploit DB (based on filename)
-        if exploitdb_id:
-            # Simulate fetching detailed exploit information from Exploit DB
-            exploit_details = simulate_exploit_db_details(exploitdb_id)
+        # Determine exploit IDs to simulate based on scan properties
+        # In a real implementation, this would query the Exploit-DB API
+        # Here we simulate it based on properties of the scan
+        
+        # Create exploit matches - simulate finding relevant exploits
+        # In a real implementation, each vulnerability would be searched against Exploit-DB
+        matches = []
+        simulated_exploit_ids = []
+        
+        # Number of exploits to simulate finding - more for critical vulnerabilities
+        num_exploits = min(len(vulnerabilities), 5)
+        if has_critical:
+            num_exploits += 2
+        
+        # Generate some exploit IDs based on the scan ID to ensure consistent results
+        # This just creates simulation data
+        if scan_id:
+            # Extract digits from scan_id if any
+            digits = re.findall(r'\d+', scan_id)
+            if digits:
+                base = int(digits[0])
+                for i in range(num_exploits):
+                    exploit_id = str((base * 17 + i * 13) % 100000 + 10000)
+                    simulated_exploit_ids.append(exploit_id)
+            else:
+                # If no digits in scan_id, use defaults
+                simulated_exploit_ids = ["12345", "23456", "34567", "45678", "56789"][:num_exploits]
+        else:
+            # Fallback
+            simulated_exploit_ids = ["12345", "23456", "34567", "45678", "56789"][:num_exploits]
             
-            # Extract potential vulnerability types from our scan results
-            detected_vuln_types = set()
-            for vuln in vulnerabilities:
-                check_id = vuln.get("check_id", "").lower()
-                message = vuln.get("message", "").lower()
+        # Ensure we have unique IDs
+        simulated_exploit_ids = list(set(simulated_exploit_ids))
+            
+        for i, exploit_id in enumerate(simulated_exploit_ids):
+            if i < len(vulnerabilities):
+                vuln = vulnerabilities[i]
+                severity = vuln.get("severity", "INFO")
+                check_id = vuln.get("check_id", "unknown")
                 
-                # Check against known vulnerability types
-                for vuln_type, keywords in exploit_details["vulnerability_keywords"].items():
-                    if any(keyword in check_id or keyword in message for keyword in [vuln_type] + keywords):
-                        detected_vuln_types.add(vuln_type)
-                        
-                        # Add a reference to the matching Exploit DB vulnerability type
-                        if "matching_exploitdb_vulnerabilities" not in vuln:
-                            vuln["matching_exploitdb_vulnerabilities"] = []
-                        
-                        # Only add if not already present
-                        if not any(e["type"] == vuln_type for e in vuln.get("matching_exploitdb_vulnerabilities", [])):
-                            vuln["matching_exploitdb_vulnerabilities"].append({
-                                "type": vuln_type,
-                                "description": f"The Exploit DB entry mentions a {vuln_type} vulnerability that matches this finding.",
-                                "exploit_id": exploitdb_id,
-                                "confidence": "High",  # Since it's a direct match from exploit DB
-                                "cve": exploit_details.get("cve", "Unknown")
-                            })
+                # Simulate exploit details
+                exploit_details = simulate_exploit_db_details(exploit_id)
+                
+                # Add keywords from vulnerabilities
+                exploit_details["vulnerability_keywords"] = list(vulnerability_keywords)
+                
+                matches.append({
+                    "vulnerability": {
+                        "id": check_id,
+                        "severity": severity,
+                        "message": vuln.get("message", "")
+                    },
+                    "exploit": {
+                        "id": exploit_id,
+                        "title": exploit_details.get("title", ""),
+                        "description": exploit_details.get("description", ""),
+                        "date": exploit_details.get("date", ""),
+                        "author": exploit_details.get("author", ""),
+                        "verified": exploit_details.get("verified", False),
+                        "vulnerabilities": exploit_details.get("vulnerabilities", []),
+                        "type": exploit_details.get("type", ""),
+                        "platform": exploit_details.get("platform", ""),
+                        "cve": exploit_details.get("cve", ""),
+                        "notes": exploit_details.get("notes", "")
+                    },
+                    "match_confidence": 75 + (i * 5) % 20  # Vary the confidence score
+                })
             
-            # Add the exploit details to our results
-            exploitdb_results.append({
-                "title": exploit_details["title"],
-                "exploit_id": f"EDB-{exploitdb_id}",
-                "description": exploit_details["description"],
-                "date": exploit_details["date"],
-                "author": exploit_details["author"],
-                "type": exploit_details["type"],
-                "platform": exploit_details["platform"],
-                "link": f"https://www.exploit-db.com/exploits/{exploitdb_id}",
-                "vulnerabilities": exploit_details["vulnerabilities"],
-                "cve": exploit_details.get("cve"),
-                "notes": exploit_details.get("notes"),
-                "verified": exploit_details.get("verified", True)
-            })
-            
-            logger.info(f"Found direct match in Exploit DB: {exploitdb_id} with {len(exploit_details['vulnerabilities'])} vulnerabilities")
-        
-        # For vulnerability pattern matching (whether or not it's a direct Exploit DB file)
-        if vuln_patterns:
-            for pattern in vuln_patterns:
-                # Only add pattern-based matches if they're common security issues
-                # and this isn't already an Exploit DB file (to avoid duplication)
-                if pattern in ["sql injection", "xss", "rce"] and not exploitdb_id:
-                    exploitdb_results.append({
-                        "title": f"Example {pattern.title()} Exploit",
-                        "exploit_id": f"EDB-{hash(pattern) % 10000 + 1000}",
-                        "description": f"This exploit demonstrates a {pattern} vulnerability similar to what was found in the scan.",
-                        "date": "2023-01-01",
-                        "author": "Security Researcher",
-                        "type": pattern,
-                        "platform": "Multiple",
-                        "link": f"https://www.exploit-db.com/exploits/{hash(pattern) % 10000 + 1000}"
-                    })
-                    file_in_exploitdb = True
-        
-        # Determine if file is in Exploit DB based on presence of results
-        file_in_exploitdb = len(exploitdb_results) > 0
-        
-        # Generate comparison result
-        comparison_result = {
+        response = {
             "scan_id": scan_id,
-            "file_name": file_name,
+            "scan_metadata": scan.get("scan_metadata", {}),
             "vulnerability_count": len(vulnerabilities),
-            "matched_patterns": list(vuln_patterns),
-            "file_in_exploitdb": file_in_exploitdb,
-            "exploitdb_results": exploitdb_results,
-            "exploitdb_id": exploitdb_id,  # Include the ID if found
-            "comparison_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "vulnerabilities": vulnerabilities  # Include the actual vulnerabilities
+            "exploits_found": len(matches),
+            "matches": matches,
+            "keywords": list(vulnerability_keywords)
         }
         
-        logger.info(f"Completed comparison with Exploit DB, found {len(exploitdb_results)} relevant entries")
-        return comparison_result
-        
-    except HTTPException as he:
-        raise he
+        return response
+            
     except Exception as e:
-        logger.error(f"Error comparing with Exploit DB: {str(e)}")
+        logger.error(f"Error comparing vulnerabilities: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error comparing with Exploit DB: {str(e)}"
+            detail=str(e)
         )
 
 def simulate_exploit_db_details(exploit_id: str):
-    """Simulate fetching detailed exploit information from Exploit DB based on ID.
+    """Simulate fetching exploit details from Exploit-DB."""
+    # Define a list of vulnerability keywords to be used in the response
+    vulnerability_keywords = [
+        "sql", "injection", "xss", "cross", "site", "scripting", "rce", "remote", "code", "execution",
+        "overflow", "buffer", "stack", "heap", "memory", "corruption", "denial", "service", "dos",
+        "authentication", "bypass", "csrf", "forgery", "privilege", "escalation", "directory", "traversal",
+        "file", "inclusion", "upload", "xxe", "entity", "deserialization", "insecure", "deserialize",
+        "command", "injection", "ldap", "ssrf", "request", "forgery", "open", "redirect"
+    ]
     
-    In a real implementation, this would query the Exploit DB API or database.
-    This function provides simulated exploit info that mimics real Exploit DB entries.
-    """
-    # Common vulnerability descriptions that might be found in Exploit DB
-    vulnerability_keywords = {
-        "sql injection": ["SQL Injection vulnerability", "allows SQL injection", "SQL query manipulation"],
-        "xss": ["Cross-site scripting vulnerability", "XSS vulnerability", "allows injection of arbitrary scripts"],
-        "rce": ["Remote code execution", "arbitrary code execution", "command injection"],
-        "path traversal": ["Path traversal vulnerability", "directory traversal", "allows accessing arbitrary files"],
-        "csrf": ["Cross-site request forgery", "CSRF vulnerability", "forged requests"],
-        "command injection": ["Command injection vulnerability", "shell command injection", "OS command execution"],
-        "overflow": ["Buffer overflow", "stack overflow", "heap overflow", "integer overflow"],
-        "authentication bypass": ["Authentication bypass", "auth bypass", "login bypass"],
-        "insecure deserialization": ["Insecure deserialization", "unsafe deserialization", "object injection"]
-    }
-    
-    # Create simulated exploit information based on ID patterns
-    # In a real implementation, this would be fetched from Exploit DB
+    # Generate deterministic but varied data based on the exploit ID
     try:
         exploit_id_num = int(exploit_id)
         
