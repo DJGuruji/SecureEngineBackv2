@@ -5,7 +5,7 @@ import shutil
 import logging
 import time
 from typing import Dict, Any, Optional, List
-from app.services.semgrep_service import run_semgrep, fetch_semgrep_rules
+from app.services.semgrep_service import run_semgrep, fetch_semgrep_rules, fetch_semgrep_rule_by_id
 from app.services.supabase_service import store_scan_results, get_scan_history, get_scan_by_id, delete_scan
 from app.core.security import calculate_security_score, count_severities
 from app.core.config import get_settings
@@ -1199,7 +1199,7 @@ async def compare_with_exploitdb(scan_id: str):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Scan with ID {scan_id} not found"
             )
-            
+        
         # Extract vulnerabilities
         vulnerabilities = scan.get("vulnerabilities", [])
         if not vulnerabilities:
@@ -1221,7 +1221,7 @@ async def compare_with_exploitdb(scan_id: str):
             # Get message content
             message = vuln.get("message", "")
             if message:
-                # Extract keywords from message
+            # Extract keywords from message
                 keywords = re.findall(r'\b[a-zA-Z]{4,}\b', message)
                 for keyword in keywords:
                     # Filter out common words
@@ -1520,7 +1520,7 @@ def simulate_exploit_db_details(exploit_id: str):
         "notes": notes,
         "verified": True,
         "vulnerability_keywords": vulnerability_keywords
-    }
+    } 
 
 @router.get("/semgrep-rules")
 async def get_semgrep_rules(
@@ -1557,4 +1557,32 @@ async def store_combined_results(combined_results: dict):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error storing combined scan results: {str(e)}"
+        )
+
+@router.get("/semgrep-rule/{rule_id}")
+async def get_semgrep_rule_by_id(rule_id: str):
+    """Fetch details for a specific Semgrep rule by ID."""
+    try:
+        # Use the rule ID directly to fetch rule details
+        rule = fetch_semgrep_rule_by_id(rule_id)
+        
+        # Log the structure of the response for debugging
+        logger.info(f"Retrieved rule details for ID {rule_id}. Keys: {list(rule.keys())}")
+        if 'definition' in rule and 'rules' in rule['definition']:
+            logger.info(f"Rule has {len(rule['definition']['rules'])} rules in definition")
+            if len(rule['definition']['rules']) > 0:
+                logger.info(f"First rule keys: {list(rule['definition']['rules'][0].keys())}")
+        
+        return rule
+    except ValueError as e:
+        logger.error(f"Error fetching semgrep rule details: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error fetching semgrep rule details: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while fetching rule details"
         )

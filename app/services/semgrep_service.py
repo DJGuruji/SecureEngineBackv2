@@ -384,3 +384,30 @@ def run_semgrep(file_path: str, custom_rule: Optional[str] = None) -> List[Dict]
     except Exception as e:
         logger.error(f"Error running semgrep: {str(e)}")
         raise 
+
+def fetch_semgrep_rule_by_id(rule_id: str) -> Dict:
+    """Fetch details for a specific Semgrep rule by its ID."""
+    try:
+        logger.info(f"Fetching semgrep rule details for ID: {rule_id}")
+        
+        # Base URL for the Semgrep Registry API - use the ID directly
+        api_url = f"https://semgrep.dev/api/registry/rule/{rule_id}"
+        
+        # Make request to Semgrep Registry API
+        logger.info(f"Making request to Semgrep Registry API: {api_url}")
+        response = requests.get(api_url, timeout=30)
+        
+        # Check if request was successful
+        if response.status_code != 200:
+            logger.error(f"Semgrep Registry API returned error: {response.status_code} - {response.text}")
+            raise ValueError(f"Failed to fetch rule details from Semgrep Registry: {response.status_code}")
+            
+        # Parse response
+        rule_data = response.json()
+        
+        logger.info(f"Retrieved rule details for {rule_id}")
+        
+        return rule_data
+    except Exception as e:
+        logger.error(f"Error fetching semgrep rule details for {rule_id}: {str(e)}")
+        raise ValueError(f"Error fetching semgrep rule details: {str(e)}") 
