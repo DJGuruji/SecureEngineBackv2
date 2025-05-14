@@ -1539,3 +1539,22 @@ async def get_semgrep_rules(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+@router.post("/combined-results")
+async def store_combined_results(combined_results: dict):
+    """Store combined scan results from multiple scanners."""
+    try:
+        logger.info("Storing combined scan results")
+        
+        # Store in database
+        result_id = store_scan_results(combined_results)
+        
+        logger.info(f"Combined scan results stored with ID: {result_id}")
+        
+        return {"success": True, "scan_id": result_id}
+    except Exception as e:
+        logger.error(f"Error storing combined scan results: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error storing combined scan results: {str(e)}"
+        )
