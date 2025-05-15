@@ -6,7 +6,6 @@ from .codeql_scanner import router as codeql_router
 from .ai_scanner import router as ai_router
 from .credit_endpoints import router as credit_router
 from .semgrep_endpoint import router as semgrep_router
-from .shiftleft_endpoint import router as shiftleft_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -19,5 +18,4 @@ router.include_router(common_router, tags=["common"])
 router.include_router(codeql_router, tags=["codeql"])
 router.include_router(ai_router, tags=["ai"])
 router.include_router(credit_router, tags=["credits"])
-router.include_router(semgrep_router, tags=["semgrep"])
-router.include_router(shiftleft_router, tags=["shiftleft"]) 
+router.include_router(semgrep_router, tags=["semgrep"]) 
