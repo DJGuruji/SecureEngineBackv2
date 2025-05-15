@@ -64,11 +64,32 @@ def store_scan_results(data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info("Storing results in Supabase")
         
+        # Debug logging for incoming vulnerabilities
+        raw_vulnerabilities = data.get("vulnerabilities", [])
+        logger.info(f"Received {len(raw_vulnerabilities)} vulnerabilities to enhance")
+        
+        if len(raw_vulnerabilities) > 0:
+            logger.debug(f"First vulnerability before enhancement: {raw_vulnerabilities[0]}")
+        
+        # Check for common issues that might cause vulnerabilities to be empty
+        if len(raw_vulnerabilities) == 0 and data.get("total_vulnerabilities", 0) > 0:
+            logger.warning("Mismatch between total_vulnerabilities and actual vulnerabilities array")
+            logger.debug(f"Data keys received: {list(data.keys())}")
+            
+            # Try to find if vulnerabilities are stored in a different key or format
+            for key, value in data.items():
+                if isinstance(value, list) and len(value) > 0:
+                    logger.debug(f"Potential list found in key '{key}' with {len(value)} items")
+                    if len(value) > 0:
+                        logger.debug(f"Sample item from '{key}': {value[0]}")
+        
         # Enhance vulnerability data
         enhanced_vulnerabilities = [
             enhance_vulnerability_data(vuln) 
-            for vuln in data.get("vulnerabilities", [])
+            for vuln in raw_vulnerabilities
         ]
+        
+        logger.info(f"Enhanced {len(enhanced_vulnerabilities)} vulnerabilities")
         
         # Prepare scan history data
         scan_data = {

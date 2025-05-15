@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
     
+    # AI Configuration
+    GEMINI_API_KEY: str = "AIzaSyCtuOKC0ykaMkTzQfiTrqIGmh-qxm_Sr-Y"
+    
     # Application Settings
     UPLOAD_DIR: str = "uploads"
     ALLOWED_EXTENSIONS: set = {".zip", ".py", ".js", ".ts", ".java", ".cpp", ".c", ".cs", ".php", ".rb", ".go", ".rs"}

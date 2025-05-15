@@ -7,6 +7,7 @@ import time
 from typing import Dict, Any, Optional, List
 from app.services.semgrep_service import run_semgrep, fetch_semgrep_rules, fetch_semgrep_rule_by_id
 from app.services.supabase_service import store_scan_results, get_scan_history, get_scan_by_id, delete_scan
+from app.services.gemini_service import scan_code_with_gemini
 from app.core.security import calculate_security_score, count_severities
 from app.core.config import get_settings
 import subprocess
@@ -1547,6 +1548,23 @@ async def store_combined_results(combined_results: dict):
     try:
         logger.info("Storing combined scan results")
         
+        # Debug logging
+        vuln_count = len(combined_results.get("vulnerabilities", []))
+        logger.info(f"Received combined results with {vuln_count} vulnerabilities")
+        logger.info(f"Severity count: {combined_results.get('severity_count', {})}")
+        logger.info(f"Total vulnerabilities reported: {combined_results.get('total_vulnerabilities', 0)}")
+        
+        if vuln_count == 0 and combined_results.get('total_vulnerabilities', 0) > 0:
+            logger.warning("Vulnerability count mismatch: total_vulnerabilities > 0 but vulnerabilities array is empty")
+            
+            # Check if vulnerabilities data might be in a different format or lost in transmission
+            for key, value in combined_results.items():
+                logger.debug(f"Combined results key: {key}, type: {type(value)}")
+        
+        # Log the first vulnerability if available
+        if vuln_count > 0:
+            logger.info(f"First vulnerability sample: {combined_results['vulnerabilities'][0]}")
+        
         # Store in database
         result_id = store_scan_results(combined_results)
         
@@ -1555,6 +1573,7 @@ async def store_combined_results(combined_results: dict):
         return {"success": True, "scan_id": result_id}
     except Exception as e:
         logger.error(f"Error storing combined scan results: {str(e)}")
+        logger.exception("Exception details:")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error storing combined scan results: {str(e)}"
@@ -1562,28 +1581,45 @@ async def store_combined_results(combined_results: dict):
 
 @router.get("/semgrep-rule/{rule_id}")
 async def get_semgrep_rule_by_id(rule_id: str):
-    """Fetch details for a specific Semgrep rule by ID."""
+    """Get details for a specific semgrep rule by ID."""
     try:
-        # Use the rule ID directly to fetch rule details
-        rule = fetch_semgrep_rule_by_id(rule_id)
-        
-        # Log the structure of the response for debugging
-        logger.info(f"Retrieved rule details for ID {rule_id}. Keys: {list(rule.keys())}")
-        if 'definition' in rule and 'rules' in rule['definition']:
-            logger.info(f"Rule has {len(rule['definition']['rules'])} rules in definition")
-            if len(rule['definition']['rules']) > 0:
-                logger.info(f"First rule keys: {list(rule['definition']['rules'][0].keys())}")
-        
-        return rule
-    except ValueError as e:
-        logger.error(f"Error fetching semgrep rule details: {str(e)}")
+        return fetch_semgrep_rule_by_id(rule_id)
+    except Exception as e:
+        logger.error(f"Error fetching semgrep rule by id: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+@router.post("/ai-scan")
+async def ai_scan(file: UploadFile = File(...)):
+    """Scan a file using Gemini AI and return the results."""
+    try:
+        logger.info(f"Starting Gemini AI scan for file: {file.filename}")
+        start_time = time.time()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Save uploaded file to temp directory
+            file_path = os.path.join(temp_dir, file.filename)
+            
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+                
+            # Run the Gemini AI scan
+            scan_results = await scan_code_with_gemini(file_path)
+            
+            # Add scan duration
+            scan_results["scan_duration"] = time.time() - start_time
+            
+            # Store results in database
+            store_scan_results(scan_results)
+            
+            logger.info(f"Gemini AI scan completed in {time.time() - start_time:.2f} seconds")
+            return scan_results
+            
     except Exception as e:
-        logger.error(f"Unexpected error fetching semgrep rule details: {str(e)}")
+        logger.error(f"Error in Gemini AI scan: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while fetching rule details"
+            detail=str(e)
         )
