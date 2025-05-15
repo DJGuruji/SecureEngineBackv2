@@ -177,3 +177,141 @@ async def delete_scan(scan_id: str) -> None:
     except Exception as e:
         logger.error(f"Error deleting scan from Supabase: {str(e)}")
         raise 
+
+# Credit management functions
+def get_user_credits(user_id: str = "default") -> Dict[str, Any]:
+    """Get the current credit balance for a user."""
+    try:
+        result = supabase.table("user_credits") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .execute()
+        
+        if not result.data or len(result.data) == 0:
+            # Create default credits if they don't exist
+            logger.info(f"No credits found for user {user_id}, creating default credits")
+            return create_default_user_credits(user_id)
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error retrieving user credits: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving user credits: {str(e)}"
+        )
+
+def create_default_user_credits(user_id: str = "default") -> Dict[str, Any]:
+    """Create default credits for a new user."""
+    try:
+        default_credits = {
+            "user_id": user_id,
+            "total_credits": 10,  # Starting credits
+            "used_credits": 0,
+            "remaining_credits": 10,
+            "last_updated": datetime.utcnow().isoformat()
+        }
+        
+        result = supabase.table("user_credits").insert(default_credits).execute()
+        
+        if not result.data:
+            logger.error("Failed to create default credits: No data returned")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create default credits"
+            )
+        
+        logger.info(f"Created default credits for user {user_id}")
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error creating default credits: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating default credits: {str(e)}"
+        )
+
+def use_credits_for_ai_scan(user_id: str = "default", credits_to_use: int = 1) -> Dict[str, Any]:
+    """Use credits for an AI scan and return updated credit info."""
+    try:
+        # Get current credits
+        current_credits = get_user_credits(user_id)
+        
+        # Check if user has enough credits
+        if current_credits["remaining_credits"] < credits_to_use:
+            logger.error(f"User {user_id} does not have enough credits for AI scan")
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Insufficient credits for AI scan"
+            )
+        
+        # Calculate new values
+        used_credits = current_credits["used_credits"] + credits_to_use
+        remaining_credits = current_credits["remaining_credits"] - credits_to_use
+        
+        # Update credit record
+        updated_credits = {
+            "used_credits": used_credits,
+            "remaining_credits": remaining_credits,
+            "last_updated": datetime.utcnow().isoformat()
+        }
+        
+        result = supabase.table("user_credits") \
+            .update(updated_credits) \
+            .eq("user_id", user_id) \
+            .execute()
+        
+        if not result.data:
+            logger.error("Failed to update credits: No data returned")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update credits"
+            )
+        
+        logger.info(f"Used {credits_to_use} credits for user {user_id}, remaining: {remaining_credits}")
+        return result.data[0]
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"Error using credits: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error using credits: {str(e)}"
+        )
+
+def add_credits(user_id: str = "default", credits_to_add: int = 10) -> Dict[str, Any]:
+    """Add more credits to a user's account."""
+    try:
+        # Get current credits
+        current_credits = get_user_credits(user_id)
+        
+        # Calculate new values
+        total_credits = current_credits["total_credits"] + credits_to_add
+        remaining_credits = current_credits["remaining_credits"] + credits_to_add
+        
+        # Update credit record
+        updated_credits = {
+            "total_credits": total_credits,
+            "remaining_credits": remaining_credits,
+            "last_updated": datetime.utcnow().isoformat()
+        }
+        
+        result = supabase.table("user_credits") \
+            .update(updated_credits) \
+            .eq("user_id", user_id) \
+            .execute()
+        
+        if not result.data:
+            logger.error("Failed to add credits: No data returned")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to add credits"
+            )
+        
+        logger.info(f"Added {credits_to_add} credits for user {user_id}, new total: {total_credits}")
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error adding credits: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error adding credits: {str(e)}"
+        ) 

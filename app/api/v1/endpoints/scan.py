@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Dict, Any, Optional, List
 from app.services.semgrep_service import run_semgrep, fetch_semgrep_rules, fetch_semgrep_rule_by_id
-from app.services.supabase_service import store_scan_results, get_scan_history, get_scan_by_id, delete_scan
+from app.services.supabase_service import store_scan_results, get_scan_history, get_scan_by_id, delete_scan, use_credits_for_ai_scan, get_user_credits, add_credits
 from app.services.gemini_service import scan_code_with_gemini
 from app.core.security import calculate_security_score, count_severities
 from app.core.config import get_settings
@@ -1592,11 +1592,26 @@ async def get_semgrep_rule_by_id(rule_id: str):
         )
 
 @router.post("/ai-scan")
-async def ai_scan(file: UploadFile = File(...)):
+async def ai_scan(file: UploadFile = File(...), user_id: str = Query("default")):
     """Scan a file using Gemini AI and return the results."""
     try:
         logger.info(f"Starting Gemini AI scan for file: {file.filename}")
         start_time = time.time()
+        
+        # Check and use credits (1 credit per AI scan)
+        from app.services.supabase_service import use_credits_for_ai_scan, get_user_credits
+        
+        # First get current credit status
+        credit_info = get_user_credits(user_id)
+        logger.info(f"User {user_id} has {credit_info['remaining_credits']} credits remaining")
+        
+        # Check if user has enough credits
+        if credit_info['remaining_credits'] < 1:
+            logger.warning(f"User {user_id} has insufficient credits for AI scan")
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Insufficient credits for AI scan. Please add more credits."
+            )
         
         with tempfile.TemporaryDirectory() as temp_dir:
             # Save uploaded file to temp directory
@@ -1620,12 +1635,68 @@ async def ai_scan(file: UploadFile = File(...)):
             result_id = store_scan_results(scan_results)
             logger.info(f"AI Scan results stored with ID: {result_id}")
             
+            # Deduct the credit for this scan AFTER successful completion
+            used_credit = use_credits_for_ai_scan(user_id, 2)
+            logger.info(f"Used 2 credits for AI scan. User {user_id} now has {used_credit['remaining_credits']} credits remaining")
+            
+            # Add credit info to response
+            scan_results["credit_info"] = {
+                "used_credits": used_credit["used_credits"],
+                "remaining_credits": used_credit["remaining_credits"]
+            }
+            
             logger.info(f"Gemini AI scan completed in {time.time() - start_time:.2f} seconds")
             return scan_results
             
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 402 Payment Required)
+        raise
     except Exception as e:
         logger.error(f"Error in Gemini AI scan: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+
+# Credit management endpoints
+@router.get("/credits")
+async def get_credits(user_id: str = Query("default")):
+    """Get the current credit balance for a user."""
+    try:
+        from app.services.supabase_service import get_user_credits
+        credit_info = get_user_credits(user_id)
+        return {
+            "user_id": credit_info["user_id"],
+            "total_credits": credit_info["total_credits"],
+            "used_credits": credit_info["used_credits"],
+            "remaining_credits": credit_info["remaining_credits"],
+            "last_updated": credit_info["last_updated"]
+        }
+    except Exception as e:
+        logger.error(f"Error getting credits: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting credits: {str(e)}"
+        )
+
+@router.post("/credits/add")
+async def add_user_credits(user_id: str = Query("default"), amount: int = Query(10, ge=1, le=100)):
+    """Add more credits to a user's account."""
+    try:
+        from app.services.supabase_service import add_credits
+        credit_info = add_credits(user_id, amount)
+        return {
+            "status": "success",
+            "message": f"Added {amount} credits to user {user_id}",
+            "user_id": credit_info["user_id"],
+            "total_credits": credit_info["total_credits"],
+            "used_credits": credit_info["used_credits"],
+            "remaining_credits": credit_info["remaining_credits"],
+            "last_updated": credit_info["last_updated"]
+        }
+    except Exception as e:
+        logger.error(f"Error adding credits: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error adding credits: {str(e)}"
         )
