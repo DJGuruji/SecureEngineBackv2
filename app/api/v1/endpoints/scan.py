@@ -1611,8 +1611,14 @@ async def ai_scan(file: UploadFile = File(...)):
             # Add scan duration
             scan_results["scan_duration"] = time.time() - start_time
             
+            # Add explicit logging for debugging vulnerability counts
+            logger.info(f"AI Scan vulnerability counts: {scan_results['severity_count']}")
+            logger.info(f"AI Scan security score: {scan_results['security_score']}")
+            logger.info(f"AI Scan total vulnerabilities: {scan_results['total_vulnerabilities']}")
+            
             # Store results in database
-            store_scan_results(scan_results)
+            result_id = store_scan_results(scan_results)
+            logger.info(f"AI Scan results stored with ID: {result_id}")
             
             logger.info(f"Gemini AI scan completed in {time.time() - start_time:.2f} seconds")
             return scan_results

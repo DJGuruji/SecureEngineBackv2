@@ -533,11 +533,11 @@ def calculate_security_score(vulnerabilities: List[Dict[str, Any]]) -> int:
     # Count vulnerabilities by severity
     severity_counts = count_vulnerabilities_by_severity(vulnerabilities)
     
-    # Calculate score - each severity type reduces the score differently
-    base_score = 100
-    high_penalty = 10
-    medium_penalty = 3
-    low_penalty = 1
+    # Use same penalty weights as the main security.py module for consistency
+    base_score = 10.0
+    high_penalty = 2.0    # Same as ERROR in security.py
+    medium_penalty = 1.0  # Same as WARNING in security.py
+    low_penalty = 0.4     # Same as INFO in security.py
     
     # Calculate deductions
     deductions = (
@@ -546,14 +546,14 @@ def calculate_security_score(vulnerabilities: List[Dict[str, Any]]) -> int:
         severity_counts["INFO"] * low_penalty
     )
     
-    # Calculate raw score (minimum 0)
-    raw_score = max(0, base_score - deductions)
+    # Calculate final score (minimum 0)
+    score = max(0, base_score - deductions)
     
-    # Convert to 1-10 scale and ensure it's not 0
-    score = max(1, math.ceil(raw_score / 10))
+    # Round to an integer and ensure it's at least 1
+    score = max(1, int(round(score)))
     
-    # Ensure score is not greater than 10
-    score = min(score, 10)
+    # Log the score calculation for debugging
+    logger.info(f"AI Scan security score: {score}, vulnerabilities: ERROR={severity_counts['ERROR']}, WARNING={severity_counts['WARNING']}, INFO={severity_counts['INFO']}")
     
     return score
   
