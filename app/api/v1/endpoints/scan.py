@@ -1527,11 +1527,12 @@ async def get_semgrep_rules(
     query: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    severity: Optional[str] = Query(None)
+    severity: Optional[str] = Query(None),
+    rule_type: Optional[str] = Query(None)
 ):
     """Fetch Semgrep rules from the registry."""
     try:
-        rules = fetch_semgrep_rules(query, limit, offset, severity)
+        rules = fetch_semgrep_rules(query, limit, offset, severity, rule_type)
         return rules
     except ValueError as e:
         logger.error(f"Error fetching semgrep rules: {str(e)}")

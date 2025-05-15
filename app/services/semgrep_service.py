@@ -11,10 +11,10 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: int = 0, severity: Optional[str] = None) -> Dict:
+def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: int = 0, severity: Optional[str] = None, rule_type: Optional[str] = None) -> Dict:
     """Fetch rules from Semgrep Registry with pagination support."""
     try:
-        logger.info(f"Fetching semgrep rules with query: {query}, limit: {limit}, offset: {offset}, severity: {severity}")
+        logger.info(f"Fetching semgrep rules with query: {query}, limit: {limit}, offset: {offset}, severity: {severity}, rule_type: {rule_type}")
         
         # Base URL for the Semgrep Registry API
         api_url = "https://semgrep.dev/api/registry/rules"
@@ -27,6 +27,11 @@ def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: in
         
         if query:
             params["query"] = query
+        
+        if rule_type:
+            # Currently the API doesn't support direct rule_type filtering
+            # We'll apply it after we get the results
+            logger.info(f"Will filter by rule_type: {rule_type} after retrieving results")
             
         # Make request to Semgrep Registry API
         logger.info(f"Making request to Semgrep Registry API: {api_url}")
@@ -92,6 +97,9 @@ def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: in
                 
                 # Log all keys to see what other data might be available
                 logger.info(f"  All keys: {', '.join(rule.keys())}")
+                # Log rule_type if available
+                if 'rule_type' in rule:
+                    logger.info(f"  Rule Type: {rule.get('rule_type')}")
             
             # Process each rule in the list
             for rule in rules_data:
@@ -118,7 +126,8 @@ def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: in
                     "path": rule.get("path", ""),
                     "source_uri": rule.get("source_uri", ""),
                     "visibility": rule.get("visibility", ""),
-                    "meta": rule.get("meta", {})
+                    "meta": rule.get("meta", {}),
+                    "rule_type": rule.get("rule_type", "")
                 }
                 rules.append(formatted_rule)
             
@@ -145,6 +154,14 @@ def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: in
                     if rule.get("severity", "").lower() == severity_lower
                 ]
                 logger.info(f"Filtered rules by severity '{severity}': {len(filtered_rules)} of {len(rules)} match")
+            
+            # Apply rule_type filtering if provided
+            if rule_type:
+                filtered_rules = [
+                    rule for rule in filtered_rules
+                    if rule.get("rule_type", "").lower() == rule_type.lower()
+                ]
+                logger.info(f"Filtered rules by rule_type '{rule_type}': {len(filtered_rules)} of {len(rules)} match")
             
             # Apply pagination
             total_rules = len(filtered_rules)
@@ -177,13 +194,22 @@ def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: in
                     "path": rule.get("path", ""),
                     "source_uri": rule.get("source_uri", ""),
                     "visibility": rule.get("visibility", ""),
-                    "meta": rule.get("meta", {})
+                    "meta": rule.get("meta", {}),
+                    "rule_type": rule.get("rule_type", "")
                 }
                 rules.append(formatted_rule)
             
             total_rules = rules_data.get("total", len(rules))
             has_more = rules_data.get("has_more", False)
             paginated_rules = rules
+            
+            # Apply rule_type filtering if provided
+            if rule_type:
+                paginated_rules = [
+                    rule for rule in paginated_rules
+                    if rule.get("rule_type", "").lower() == rule_type.lower()
+                ]
+                logger.info(f"Filtered rules by rule_type '{rule_type}': {len(paginated_rules)} of {len(rules)} match")
         
         logger.info(f"Retrieved {len(paginated_rules)} rules from Semgrep Registry, total={total_rules}, has_more={has_more}")
         
@@ -405,8 +431,30 @@ def fetch_semgrep_rule_by_id(rule_id: str) -> Dict:
         # Parse response
         rule_data = response.json()
         
-        logger.info(f"Retrieved rule details for {rule_id}")
+        # Log detailed information about the response structure for debugging
+        logger.info(f"Retrieved rule details for {rule_id}. Response keys: {list(rule_data.keys())}")
         
+        # Check for important fields and log their presence
+        if 'definition' in rule_data:
+            logger.info("Rule has 'definition' field")
+            if 'rules' in rule_data['definition']:
+                logger.info(f"Rule definition has {len(rule_data['definition']['rules'])} rules")
+                if rule_data['definition']['rules'] and len(rule_data['definition']['rules']) > 0:
+                    logger.info(f"First rule keys: {list(rule_data['definition']['rules'][0].keys())}")
+                    # Check if severity exists in rule definition
+                    if 'severity' in rule_data['definition']['rules'][0]:
+                        logger.info(f"Rule has severity: {rule_data['definition']['rules'][0]['severity']}")
+                    else:
+                        logger.warning("Rule is missing severity in definition.rules[0]")
+        else:
+            logger.warning("Response lacks 'definition' field")
+            
+        # Check if 'path' exists
+        if 'path' in rule_data:
+            logger.info(f"Rule has path: {rule_data['path']}")
+        else:
+            logger.warning("Rule is missing 'path' field")
+            
         return rule_data
     except Exception as e:
         logger.error(f"Error fetching semgrep rule details for {rule_id}: {str(e)}")
