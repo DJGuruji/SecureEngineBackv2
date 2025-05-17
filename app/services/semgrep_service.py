@@ -9,226 +9,58 @@ import yaml
 import requests
 from urllib.parse import quote
 
+# Import our custom rules module
+from app.resources.semgrep_rules.index import get_all_custom_rules, get_custom_rule_by_id
+
 logger = logging.getLogger(__name__)
 
 def fetch_semgrep_rules(query: Optional[str] = None, limit: int = 50, offset: int = 0, severity: Optional[str] = None, rule_type: Optional[str] = None) -> Dict:
-    """Fetch rules from Semgrep Registry with pagination support."""
+    """Fetch rules from custom Semgrep rules with pagination support."""
     try:
-        logger.info(f"Fetching semgrep rules with query: {query}, limit: {limit}, offset: {offset}, severity: {severity}, rule_type: {rule_type}")
+        logger.info(f"Fetching custom semgrep rules with query: {query}, limit: {limit}, offset: {offset}, severity: {severity}, rule_type: {rule_type}")
         
-        # Base URL for the Semgrep Registry API
-        api_url = "https://semgrep.dev/api/registry/rules"
+        # Use our custom rules module instead of the Semgrep Registry
+        result = get_all_custom_rules(query, limit, offset, severity, rule_type)
         
-        # Prepare query parameters
-        params = {
-            "limit": limit,
-            "offset": offset
-        }
+        logger.info(f"Retrieved {len(result['rules'])} custom rules, total={result['total']}, has_more={result['has_more']}")
         
-        if query:
-            params["query"] = query
-        
-        if rule_type:
-            # Currently the API doesn't support direct rule_type filtering
-            # We'll apply it after we get the results
-            logger.info(f"Will filter by rule_type: {rule_type} after retrieving results")
-            
-        # Make request to Semgrep Registry API
-        logger.info(f"Making request to Semgrep Registry API: {api_url}")
-        response = requests.get(api_url, params=params, timeout=30)
-        
-        # Check if request was successful
-        if response.status_code != 200:
-            logger.error(f"Semgrep Registry API returned error: {response.status_code} - {response.text}")
-            raise ValueError(f"Failed to fetch rules from Semgrep Registry: {response.status_code}")
-            
-        # Parse response
-        rules_data = response.json()
-        
-        # API returns a list of rules
-        if isinstance(rules_data, list):
-            rules = []
-            logger.info(f"Processing {len(rules_data)} rules from list response")
-            
-            # Add debug logging for the first few rules to understand structure
-            for i, rule in enumerate(rules_data[:5]):  # Log first 5 rules
-                logger.info(f"Rule {i+1} details:")
-                logger.info(f"  ID: {rule.get('id', 'NOT PROVIDED')}")
-                logger.info(f"  Name: {rule.get('name', 'NOT PROVIDED')}")
-                logger.info(f"  Description length: {len(str(rule.get('description', '')))}")
-                logger.info(f"  Path: {rule.get('path', 'NOT PROVIDED')}")
-                
-                # Log languages with special attention
-                languages = rule.get('languages', [])
-                if languages:
-                    if isinstance(languages, list):
-                        logger.info(f"  Languages: {', '.join(languages)}")
-                        
-                        # Check for specific languages of interest
-                        language_checks = {
-                            "python": "Python",
-                            "javascript": "JavaScript", 
-                            "typescript": "TypeScript",
-                            "java": "Java", 
-                            "go": "Go",
-                            "ruby": "Ruby",
-                            "c": "C",
-                            "cpp": "C++",
-                            "csharp": "C#"
-                        }
-                        
-                        found_languages = []
-                        for lang_key, lang_name in language_checks.items():
-                            if lang_key in [l.lower() for l in languages]:
-                                found_languages.append(lang_name)
-                        
-                        if found_languages:
-                            logger.info(f"  Recognized languages: {', '.join(found_languages)}")
-                        else:
-                            logger.info("  No recognized mainstream languages found")
-                    else:
-                        logger.info(f"  Languages (non-list): {languages}")
-                else:
-                    logger.info("  Languages: NONE")
-                
-                # Log category info
-                logger.info(f"  Category: {rule.get('category', 'NOT PROVIDED')}")
-                logger.info(f"  Severity: {rule.get('severity', 'NOT PROVIDED')}")
-                
-                # Log all keys to see what other data might be available
-                logger.info(f"  All keys: {', '.join(rule.keys())}")
-                # Log rule_type if available
-                if 'rule_type' in rule:
-                    logger.info(f"  Rule Type: {rule.get('rule_type')}")
-            
-            # Process each rule in the list
-            for rule in rules_data:
-                # Only skip rules with no ID - allow other fields to be missing
-                if not rule.get("id"):
-                    logger.warning("Skipping rule with missing ID")
-                    continue
-                    
-                formatted_rule = {
-                    "id": rule.get("id", ""),
-                    "name": rule.get("name", "Unknown Rule"),
-                    "description": rule.get("description", "No description available"),
-                    "category": rule.get("category", "Security"),
-                    "languages": rule.get("languages", []),
-                    "severity": rule.get("severity", "WARNING"),
-                    "patterns": rule.get("patterns", []),
-                    "message": rule.get("message", ""),
-                    "metadata": rule.get("metadata", {}),
-                    "fix": rule.get("fix", ""),
-                    "fix_regex": rule.get("fix-regex", ""),
-                    "rule_id": rule.get("ruleid", ""),
-                    "tags": rule.get("tags", []),
-                    "mode": rule.get("mode", ""),
-                    "path": rule.get("path", ""),
-                    "source_uri": rule.get("source_uri", ""),
-                    "visibility": rule.get("visibility", ""),
-                    "meta": rule.get("meta", {}),
-                    "rule_type": rule.get("rule_type", "")
-                }
-                rules.append(formatted_rule)
-            
-            # Filter by query if provided
-            filtered_rules = rules
-            if query:
-                query_lower = query.lower()
-                filtered_rules = [
-                    rule for rule in rules 
-                    if query_lower in rule["id"].lower() or 
-                       query_lower in (rule["name"] or "").lower() or 
-                       query_lower in (rule["description"] or "").lower() or
-                       query_lower in (rule["path"] or "").lower() or  # Also search in the path
-                       (rule.get("category") and query_lower in rule["category"].lower()) or
-                       any(query_lower in lang.lower() for lang in rule.get("languages", []))
-                ]
-                logger.info(f"Filtered rules by query '{query}': {len(filtered_rules)} of {len(rules)} match")
-            
-            # Apply server-side filtering for severity if provided
-            if severity:
-                severity_lower = severity.lower()
-                filtered_rules = [
-                    rule for rule in filtered_rules
-                    if rule.get("severity", "").lower() == severity_lower
-                ]
-                logger.info(f"Filtered rules by severity '{severity}': {len(filtered_rules)} of {len(rules)} match")
-            
-            # Apply rule_type filtering if provided
-            if rule_type:
-                filtered_rules = [
-                    rule for rule in filtered_rules
-                    if rule.get("rule_type", "").lower() == rule_type.lower()
-                ]
-                logger.info(f"Filtered rules by rule_type '{rule_type}': {len(filtered_rules)} of {len(rules)} match")
-            
-            # Apply pagination
-            total_rules = len(filtered_rules)
-            paginated_rules = filtered_rules[offset:offset + limit]
-            has_more = (offset + limit) < total_rules
-        else:
-            # Handle the case where the API returns a dictionary with results field
-            rules = []
-            for rule in rules_data.get("results", []):
-                # Only skip rules with no ID - allow other fields to be missing
-                if not rule.get("id"):
-                    logger.warning("Skipping rule with missing ID")
-                    continue
-                    
-                formatted_rule = {
-                    "id": rule.get("id", ""),
-                    "name": rule.get("name", "Unknown Rule"),
-                    "description": rule.get("description", "No description available"),
-                    "category": rule.get("category", "Security"),
-                    "languages": rule.get("languages", []),
-                    "severity": rule.get("severity", "WARNING"),
-                    "patterns": rule.get("patterns", []),
-                    "message": rule.get("message", ""),
-                    "metadata": rule.get("metadata", {}),
-                    "fix": rule.get("fix", ""),
-                    "fix_regex": rule.get("fix-regex", ""),
-                    "rule_id": rule.get("ruleid", ""),
-                    "tags": rule.get("tags", []),
-                    "mode": rule.get("mode", ""),
-                    "path": rule.get("path", ""),
-                    "source_uri": rule.get("source_uri", ""),
-                    "visibility": rule.get("visibility", ""),
-                    "meta": rule.get("meta", {}),
-                    "rule_type": rule.get("rule_type", "")
-                }
-                rules.append(formatted_rule)
-            
-            total_rules = rules_data.get("total", len(rules))
-            has_more = rules_data.get("has_more", False)
-            paginated_rules = rules
-            
-            # Apply rule_type filtering if provided
-            if rule_type:
-                paginated_rules = [
-                    rule for rule in paginated_rules
-                    if rule.get("rule_type", "").lower() == rule_type.lower()
-                ]
-                logger.info(f"Filtered rules by rule_type '{rule_type}': {len(paginated_rules)} of {len(rules)} match")
-        
-        logger.info(f"Retrieved {len(paginated_rules)} rules from Semgrep Registry, total={total_rules}, has_more={has_more}")
-        
-        # Don't filter out incomplete rules - just ensure they have an ID
-        validRules = [rule for rule in paginated_rules if rule.get("id")]
-        
-        if len(validRules) < len(paginated_rules):
-            logger.warning(f"Filtered out {len(paginated_rules) - len(validRules)} rules with missing IDs")
-        
-        return {
-            "rules": validRules,
-            "total": total_rules,
-            "has_more": has_more,
-            "limit": limit,
-            "offset": offset
-        }
+        return result
     except Exception as e:
-        logger.error(f"Unexpected error fetching semgrep rules: {str(e)}")
+        logger.error(f"Unexpected error fetching custom semgrep rules: {str(e)}")
         raise ValueError(f"Unexpected error: {str(e)}")
+        
+# The following code is kept just for reference in case we need to revert
+"""
+def fetch_semgrep_rules_from_registry(query: Optional[str] = None, limit: int = 50, offset: int = 0, severity: Optional[str] = None, rule_type: Optional[str] = None) -> Dict:
+    # Base URL for the Semgrep Registry API
+    api_url = "https://semgrep.dev/api/registry/rules"
+    
+    # Prepare query parameters
+    params = {
+        "limit": limit,
+        "offset": offset
+    }
+    
+    if query:
+        params["query"] = query
+    
+    if rule_type:
+        # Currently the API doesn't support direct rule_type filtering
+        # We'll apply it after we get the results
+        logger.info(f"Will filter by rule_type: {rule_type} after retrieving results")
+        
+    # Make request to Semgrep Registry API
+    logger.info(f"Making request to Semgrep Registry API: {api_url}")
+    response = requests.get(api_url, params=params, timeout=30)
+    
+    # Check if request was successful
+    if response.status_code != 200:
+        logger.error(f"Semgrep Registry API returned error: {response.status_code} - {response.text}")
+        raise ValueError(f"Failed to fetch rules from Semgrep Registry: {response.status_code}")
+        
+    # Parse response
+    rules_data = response.json()
+"""
 
 def run_semgrep(file_path: str, custom_rule: Optional[str] = None) -> List[Dict]:
     """Run semgrep on a file or directory and return results."""
@@ -260,36 +92,35 @@ def run_semgrep(file_path: str, custom_rule: Optional[str] = None) -> List[Dict]
         if custom_rule:
             try:
                 logger.info("Processing custom rule...")
-                # Check if this is a registry ID (no JSON markers)
+                # Check if this is a custom rule ID (no JSON markers)
                 if not custom_rule.startswith('{') and not custom_rule.endswith('}'):
-                    registry_id = custom_rule.strip()
+                    rule_id = custom_rule.strip()
+                    logger.info(f"Looking for custom rule with ID: '{rule_id}'")
                     
-                    # Log registry ID details for debugging
-                    logger.info(f"Registry ID details: '{registry_id}'")
-                    parts = registry_id.split('/')
-                    if len(parts) > 1:
-                        logger.info(f"  Registry namespace: {parts[0]}")
-                        logger.info(f"  Registry rule name: {'/'.join(parts[1:])}")
-                    if registry_id.startswith('p/'):
-                        logger.info("  This appears to be a ruleset pack")
-                    elif registry_id.startswith('r/'):
-                        logger.info("  This appears to be a rule reference")
-                    else:
-                        logger.info("  This appears to be a custom rule ID format")
+                    # Try to get the rule from our custom rules
+                    rule_data = get_custom_rule_by_id(rule_id)
                     
-                    # Validate registry ID
-                    if registry_id.startswith('p/') or registry_id.startswith('r/'):
-                        # Standard pattern pack IDs, use as-is
-                        logger.info(f"Using standard registry pack: {registry_id}")
-                    elif registry_id == "auto":
+                    if rule_data:
+                        logger.info(f"Found custom rule with ID: {rule_id}")
+                        
+                        # Create temporary file for the rule
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_rule:
+                            # Convert to YAML format that Semgrep expects
+                            yaml.dump(rule_data, temp_rule)
+                            temp_rule_path = temp_rule.name
+                            logger.info(f"Created temporary rule file at: {temp_rule_path}")
+                        
+                        # Add rule file to command
+                        cmd.extend(["--config", temp_rule_path])
+                        logger.info(f"Using custom rule file: {temp_rule_path}")
+                    elif rule_id == "auto":
                         # Special case for auto rules
                         logger.info("Using auto rules")
+                        cmd.extend(["--config", "auto"])
                     else:
-                        # For other IDs, use p/default as a fallback
-                        logger.warning(f"Non-standard rule ID format: {registry_id}. Using p/default as fallback.")
-                        registry_id = "p/default"
-                    
-                    cmd.extend(["--config", registry_id])
+                        # If not found in custom rules, use auto rules as fallback
+                        logger.warning(f"Custom rule ID {rule_id} not found. Using auto rules as fallback.")
+                        cmd.extend(["--config", "auto"])
                 else:
                     # Validate JSON format
                     rule_data = json.loads(custom_rule)
@@ -414,48 +245,63 @@ def run_semgrep(file_path: str, custom_rule: Optional[str] = None) -> List[Dict]
 def fetch_semgrep_rule_by_id(rule_id: str) -> Dict:
     """Fetch details for a specific Semgrep rule by its ID."""
     try:
-        logger.info(f"Fetching semgrep rule details for ID: {rule_id}")
+        logger.info(f"Fetching custom semgrep rule details for ID: {rule_id}")
         
-        # Base URL for the Semgrep Registry API - use the ID directly
-        api_url = f"https://semgrep.dev/api/registry/rule/{rule_id}"
+        # Use our custom rules instead of the Semgrep Registry
+        rule_data = get_custom_rule_by_id(rule_id)
         
-        # Make request to Semgrep Registry API
-        logger.info(f"Making request to Semgrep Registry API: {api_url}")
-        response = requests.get(api_url, timeout=30)
-        
-        # Check if request was successful
-        if response.status_code != 200:
-            logger.error(f"Semgrep Registry API returned error: {response.status_code} - {response.text}")
-            raise ValueError(f"Failed to fetch rule details from Semgrep Registry: {response.status_code}")
+        if not rule_data:
+            logger.error(f"Custom rule with ID {rule_id} not found")
+            raise ValueError(f"Custom rule with ID {rule_id} not found")
             
-        # Parse response
-        rule_data = response.json()
+        logger.info(f"Retrieved custom rule details for {rule_id}")
         
-        # Log detailed information about the response structure for debugging
-        logger.info(f"Retrieved rule details for {rule_id}. Response keys: {list(rule_data.keys())}")
-        
-        # Check for important fields and log their presence
-        if 'definition' in rule_data:
-            logger.info("Rule has 'definition' field")
-            if 'rules' in rule_data['definition']:
-                logger.info(f"Rule definition has {len(rule_data['definition']['rules'])} rules")
-                if rule_data['definition']['rules'] and len(rule_data['definition']['rules']) > 0:
-                    logger.info(f"First rule keys: {list(rule_data['definition']['rules'][0].keys())}")
-                    # Check if severity exists in rule definition
-                    if 'severity' in rule_data['definition']['rules'][0]:
-                        logger.info(f"Rule has severity: {rule_data['definition']['rules'][0]['severity']}")
-                    else:
-                        logger.warning("Rule is missing severity in definition.rules[0]")
-        else:
-            logger.warning("Response lacks 'definition' field")
-            
-        # Check if 'path' exists
-        if 'path' in rule_data:
-            logger.info(f"Rule has path: {rule_data['path']}")
-        else:
-            logger.warning("Rule is missing 'path' field")
-            
         return rule_data
     except Exception as e:
-        logger.error(f"Error fetching semgrep rule details for {rule_id}: {str(e)}")
-        raise ValueError(f"Error fetching semgrep rule details: {str(e)}") 
+        logger.error(f"Error fetching custom semgrep rule details for {rule_id}: {str(e)}")
+        raise ValueError(f"Error fetching custom semgrep rule details: {str(e)}")
+        
+# The following code is kept just for reference in case we need to revert
+"""
+def fetch_semgrep_rule_by_id_from_registry(rule_id: str) -> Dict:
+    # Base URL for the Semgrep Registry API - use the ID directly
+    api_url = f"https://semgrep.dev/api/registry/rule/{rule_id}"
+    
+    # Make request to Semgrep Registry API
+    logger.info(f"Making request to Semgrep Registry API: {api_url}")
+    response = requests.get(api_url, timeout=30)
+    
+    # Check if request was successful
+    if response.status_code != 200:
+        logger.error(f"Semgrep Registry API returned error: {response.status_code} - {response.text}")
+        raise ValueError(f"Failed to fetch rule details from Semgrep Registry: {response.status_code}")
+        
+    # Parse response
+    rule_data = response.json()
+    
+    # Log detailed information about the response structure for debugging
+    logger.info(f"Retrieved rule details for {rule_id}. Response keys: {list(rule_data.keys())}")
+    
+    # Check for important fields and log their presence
+    if 'definition' in rule_data:
+        logger.info("Rule has 'definition' field")
+        if 'rules' in rule_data['definition']:
+            logger.info(f"Rule definition has {len(rule_data['definition']['rules'])} rules")
+            if rule_data['definition']['rules'] and len(rule_data['definition']['rules']) > 0:
+                logger.info(f"First rule keys: {list(rule_data['definition']['rules'][0].keys())}")
+                # Check if severity exists in rule definition
+                if 'severity' in rule_data['definition']['rules'][0]:
+                    logger.info(f"Rule has severity: {rule_data['definition']['rules'][0]['severity']}")
+                else:
+                    logger.warning("Rule is missing severity in definition.rules[0]")
+    else:
+        logger.warning("Response lacks 'definition' field")
+        
+    # Check if 'path' exists
+    if 'path' in rule_data:
+        logger.info(f"Rule has path: {rule_data['path']}")
+    else:
+        logger.warning("Rule is missing 'path' field")
+        
+    return rule_data
+""" 
