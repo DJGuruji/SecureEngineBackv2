@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 import yaml
 import requests
 from urllib.parse import quote
+from app.core.scan_exclusions import EXCLUDED_PATTERNS
 
 # Import our custom rules module
 from app.resources.semgrep_rules.index import get_all_custom_rules, get_custom_rule_by_id
@@ -87,6 +88,12 @@ def run_semgrep(file_path: str, custom_rule: Optional[str] = None) -> List[Dict]
         
         # Base command
         cmd = ["semgrep", "--json", "--verbose"]
+        
+        # Add exclusion patterns
+        for pattern in EXCLUDED_PATTERNS:
+            # Clean pattern for semgrep exclusion format
+            clean_pattern = pattern.rstrip('/')
+            cmd.extend(["--exclude", clean_pattern])
         
         # Handle custom rule
         if custom_rule:

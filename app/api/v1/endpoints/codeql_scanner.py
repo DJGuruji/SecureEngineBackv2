@@ -6,9 +6,12 @@ import logging
 import time
 import subprocess
 import json
+import re
+from typing import List, Dict, Any
 from app.services.supabase_service import store_scan_results
 from app.core.security import calculate_security_score, count_severities
 from app.core.config import get_settings
+from app.core.scan_exclusions import EXCLUDED_PATTERNS, should_exclude_path, filter_excluded_dirs
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -117,22 +120,70 @@ async def codeql_scan(file: UploadFile = File(...)):
             db_path = os.path.join(temp_dir, "codeql_db")
             os.makedirs(db_path, exist_ok=True)
             
-            # Run CodeQL database creation
+            # Create a .codeqlignore file
+            codeqlignore_path = os.path.join(source_root, ".codeqlignore")
+            with open(codeqlignore_path, 'w') as ignore_file:
+                for pattern in EXCLUDED_PATTERNS:
+                    clean_pattern = pattern.rstrip('/')
+                    ignore_file.write(f"{clean_pattern}\n")
+            
+            logger.info(f"Created .codeqlignore file at {codeqlignore_path}")
+            
+            # Add more basic options for database creation
             create_db_cmd = [
                 codeql_binary, "database", "create",
                 db_path,
                 f"--language={language}",
-                "--source-root", source_root
+                "--source-root", source_root,
+                "--overwrite"  # Overwrite existing database if it exists
             ]
             
             logger.info(f"Creating CodeQL database with command: {' '.join(create_db_cmd)}")
-            create_db_process = subprocess.run(
-                create_db_cmd, 
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            logger.info(f"Database creation output: {create_db_process.stdout}")
+            
+            try:
+                create_db_process = subprocess.run(
+                    create_db_cmd, 
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                logger.info(f"Database creation output: {create_db_process.stdout}")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"CodeQL database creation failed: {str(e)}")
+                logger.error(f"Stdout: {e.stdout}")
+                logger.error(f"Stderr: {e.stderr}")
+                
+                # Instead of failing completely, let's proceed with a simulated analysis
+                logger.warning("CodeQL database creation failed. Proceeding with simulated analysis.")
+                
+                # Create a simulated analysis result
+                vulnerabilities = simulate_codeql_results(source_root, language)
+                
+                security_score = calculate_security_score(vulnerabilities)
+                severity_count = count_severities(vulnerabilities)
+                total_vulnerabilities = len(vulnerabilities)
+                
+                # Prepare scan results with simulated data
+                scan_results = {
+                    "file_name": file.filename,
+                    "security_score": security_score,
+                    "vulnerabilities": vulnerabilities,
+                    "severity_count": severity_count,
+                    "total_vulnerabilities": total_vulnerabilities,
+                    "scan_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "scan_duration": time.time() - start_time,
+                    "scan_metadata": {
+                        "scan_type": "CodeQL (Simulated)",
+                        "language": language,
+                        "note": "CodeQL database creation failed, using pattern-based analysis instead"
+                    }
+                }
+                
+                # Store results in database
+                store_scan_results(scan_results)
+                
+                logger.info(f"Simulated CodeQL scan completed with {total_vulnerabilities} findings")
+                return scan_results
             
             # Define results path
             results_path = os.path.join(temp_dir, "results.sarif")
@@ -387,3 +438,189 @@ dependencies:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred during CodeQL scan: {str(e)}"
         ) 
+
+def simulate_codeql_results(dir_path: str, language: str) -> List[Dict[str, Any]]:
+    """
+    Simulates CodeQL scanning using basic pattern matching when actual CodeQL fails.
+    This provides a fallback mechanism to identify potential vulnerabilities.
+    
+    Args:
+        dir_path: Path to the directory to scan
+        language: Programming language to analyze
+        
+    Returns:
+        List of detected vulnerabilities in a format compatible with the frontend
+    """
+    logger.info(f"Simulating CodeQL scan for {language} in {dir_path}")
+    vulnerabilities = []
+    
+    # Define vulnerability patterns based on language
+    patterns = {}
+    
+    if language == "javascript":
+        patterns = {
+            "eval_usage": {
+                "pattern": r"eval\s*\(",
+                "message": "Potentially dangerous use of eval() function",
+                "severity": "ERROR"
+            },
+            "innerHTML": {
+                "pattern": r"\.innerHTML\s*=",
+                "message": "Potential XSS vulnerability from setting innerHTML directly",
+                "severity": "WARNING"
+            },
+            "document_write": {
+                "pattern": r"document\.write\(",
+                "message": "Potential XSS vulnerability from using document.write()",
+                "severity": "WARNING"
+            },
+            "hardcoded_secret": {
+                "pattern": r"(?:password|token|secret|key|apikey)\s*[:=]\s*['\"][^'\"]+['\"]",
+                "message": "Hardcoded credentials or secret detected",
+                "severity": "ERROR"
+            },
+            "insecure_timeout": {
+                "pattern": r"(?:setTimeout|setInterval)\(\s*['\"].*?['\"]",
+                "message": "Potentially insecure use of setTimeout/setInterval with string argument",
+                "severity": "WARNING"
+            },
+            "dangerous_function": {
+                "pattern": r"new Function\(",
+                "message": "Potentially dangerous use of Function constructor",
+                "severity": "ERROR"
+            }
+        }
+    elif language == "python":
+        patterns = {
+            "exec_usage": {
+                "pattern": r"(?:exec|eval)\s*\(",
+                "message": "Potentially dangerous use of exec()/eval() function",
+                "severity": "ERROR"
+            },
+            "os_system": {
+                "pattern": r"os\.system\(",
+                "message": "Potentially insecure use of os.system()",
+                "severity": "ERROR"
+            },
+            "subprocess_shell": {
+                "pattern": r"subprocess\.(?:call|Popen|run)\(.*?shell\s*=\s*True",
+                "message": "Potentially insecure subprocess call with shell=True",
+                "severity": "ERROR"
+            },
+            "sql_injection": {
+                "pattern": r"execute\(['\"].*?\%.*?['\"].*?\)",
+                "message": "Potential SQL injection vulnerability",
+                "severity": "ERROR"
+            },
+            "hardcoded_secret": {
+                "pattern": r"(?:password|secret|key|token|apikey)\s*=\s*['\"][^'\"]+['\"]",
+                "message": "Hardcoded credentials or secret detected",
+                "severity": "ERROR"
+            },
+            "pickle_usage": {
+                "pattern": r"pickle\.loads\(",
+                "message": "Use of potentially unsafe pickle.loads()",
+                "severity": "WARNING"
+            }
+        }
+    elif language == "java":
+        patterns = {
+            "sql_injection": {
+                "pattern": r"executeQuery\(['\"].*?\+.*?['\"]",
+                "message": "Potential SQL injection vulnerability",
+                "severity": "ERROR"
+            },
+            "command_injection": {
+                "pattern": r"Runtime\.getRuntime\(\)\.exec\(",
+                "message": "Potential command injection vulnerability",
+                "severity": "ERROR"
+            },
+            "hardcoded_secret": {
+                "pattern": r"(?:password|secret|key)\s*=\s*['\"][^'\"]+['\"]",
+                "message": "Hardcoded credentials or secret detected",
+                "severity": "ERROR"
+            }
+        }
+    else:
+        # Generic patterns for other languages
+        patterns = {
+            "hardcoded_secret": {
+                "pattern": r"(?:password|secret|key|token|apikey)\s*[:=]\s*['\"][^'\"]+['\"]",
+                "message": "Hardcoded credentials or secret detected",
+                "severity": "ERROR"
+            }
+        }
+    
+    # Scan files for vulnerability patterns
+    for root, dirs, files in os.walk(dir_path):
+        # Skip excluded directories
+        filter_excluded_dirs(dirs)
+        
+        for file in files:
+            # Skip files that match exclusion patterns
+            if should_exclude_path(file):
+                continue
+            
+            # Check file extension based on language
+            extensions = []
+            if language == "javascript":
+                extensions = ['.js', '.jsx', '.ts', '.tsx']
+            elif language == "python":
+                extensions = ['.py']
+            elif language == "java":
+                extensions = ['.java']
+            else:
+                # For other languages, check everything
+                extensions = ['.cpp', '.c', '.h', '.cs', '.go', '.rb', '.php']
+            
+            file_ext = os.path.splitext(file)[1].lower()
+            if file_ext not in extensions:
+                continue
+                
+            file_path = os.path.join(root, file)
+            rel_path = os.path.relpath(file_path, dir_path)
+            
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    
+                # Check each line for vulnerability patterns
+                lines = content.split('\n')
+                for i, line in enumerate(lines):
+                    line_num = i + 1
+                    
+                    # Skip comments based on language
+                    if language == "javascript" and (line.strip().startswith('//') or line.strip().startswith('/*')):
+                        continue
+                    elif language == "python" and line.strip().startswith('#'):
+                        continue
+                    elif language == "java" and (line.strip().startswith('//') or line.strip().startswith('/*')):
+                        continue
+                    
+                    # Check each pattern
+                    for name, pattern_info in patterns.items():
+                        matches = re.finditer(pattern_info["pattern"], line)
+                        for match in matches:
+                            vulnerabilities.append({
+                                "check_id": f"codeql-simulated.{language}.{name}",
+                                "path": rel_path,
+                                "start": {"line": line_num, "col": match.start() + 1},
+                                "end": {"line": line_num, "col": match.end() + 1},
+                                "message": pattern_info["message"],
+                                "severity": pattern_info["severity"],
+                                "extra": {
+                                    "severity": pattern_info["severity"],
+                                    "message": pattern_info["message"],
+                                    "lines": line.strip(),
+                                    "rule_name": f"CodeQL ({name})",
+                                    "metadata": {
+                                        "source": "Simulated CodeQL scan",
+                                        "confidence": "Medium"
+                                    }
+                                }
+                            })
+            except Exception as e:
+                logger.warning(f"Error scanning file {file_path}: {str(e)}")
+    
+    logger.info(f"Simulated CodeQL scan found {len(vulnerabilities)} vulnerabilities")
+    return vulnerabilities 

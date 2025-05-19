@@ -11,6 +11,7 @@ from typing import Dict, Any, List
 from app.services.supabase_service import store_scan_results
 from app.core.security import calculate_security_score, count_severities
 from app.core.config import get_settings
+from app.core.scan_exclusions import should_exclude_path, filter_excluded_dirs
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -151,42 +152,27 @@ def scan_python_files(dir_path: str) -> List[Dict[str, Any]]:
     
     # Define patterns to search for
     patterns = {
-        "eval": {
-            "pattern": r"eval\((.*?)\)",
-            "message": "Potentially dangerous use of eval()",
-            "severity": "ERROR"
-        },
-        "exec": {
-            "pattern": r"exec\((.*?)\)",
-            "message": "Potentially dangerous use of exec()",
-            "severity": "ERROR"
-        },
-        "os_system": {
-            "pattern": r"os\.system\((.*?)\)",
-            "message": "Potentially insecure use of os.system()",
-            "severity": "ERROR"
-        },
-        "subprocess": {
-            "pattern": r"subprocess\.(?:call|Popen|run)\((.*?)(shell\s*=\s*True|[\"']shell[\"']\s*:\s*True)",
-            "message": "Potentially insecure subprocess call with shell=True",
-            "severity": "ERROR"
-        },
-        "hardcoded_password": {
-            "pattern": r"(?:password|passwd|pwd|secret)\s*=\s*['\"][^'\"]+['\"]",
-            "message": "Hardcoded password or secret found",
-            "severity": "ERROR"
-        },
         "sql_injection": {
-            "pattern": r"execute\(['\"].*?\%.*?['\"].*?\)",
+            "pattern": r"(?:execute|executemany|cursor\.execute)\(['\"].*?\+.*?['\"]",
             "message": "Potential SQL injection vulnerability",
             "severity": "ERROR"
         },
-        "insecure_hash": {
-            "pattern": r"hashlib\.(?:md5|sha1)\(",
-            "message": "Use of insecure hash algorithm (MD5 or SHA1)",
-            "severity": "WARNING"
+        "command_injection": {
+            "pattern": r"(?:os\.system|os\.popen|subprocess\.Popen|subprocess\.call|subprocess\.run|eval|exec)\(",
+            "message": "Potential command injection vulnerability",
+            "severity": "ERROR"
         },
-        "pickle": {
+        "xss": {
+            "pattern": r"(?:render_template|render|jsonify|make_response|Response)\(.*?\+.*?\)",
+            "message": "Potential XSS vulnerability in template rendering",
+            "severity": "ERROR"
+        },
+        "hardcoded_secret": {
+            "pattern": r"(?:password|secret|key|token|apikey)\s*=\s*['\"][^'\"]+['\"]",
+            "message": "Hardcoded credentials or secret",
+            "severity": "ERROR"
+        },
+        "insecure_deserialize": {
             "pattern": r"pickle\.loads\(",
             "message": "Use of potentially unsafe pickle.loads()",
             "severity": "WARNING"
@@ -200,10 +186,17 @@ def scan_python_files(dir_path: str) -> List[Dict[str, Any]]:
     
     # Find all Python files and scan them
     for root, dirs, files in os.walk(dir_path):
+        # Filter out excluded directories
+        filter_excluded_dirs(dirs)
+        
         for file in files:
             if file.endswith('.py'):
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, dir_path)
+                
+                # Skip excluded files
+                if should_exclude_path(rel_path):
+                    continue
                 
                 try:
                     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -289,10 +282,17 @@ def scan_js_files(dir_path: str) -> List[Dict[str, Any]]:
     
     # Find all JS/TS files and scan them
     for root, dirs, files in os.walk(dir_path):
+        # Filter out excluded directories
+        filter_excluded_dirs(dirs)
+        
         for file in files:
             if file.endswith(('.js', '.jsx', '.ts', '.tsx')):
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, dir_path)
+                
+                # Skip excluded files
+                if should_exclude_path(rel_path):
+                    continue
                 
                 try:
                     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -368,10 +368,17 @@ def scan_java_files(dir_path: str) -> List[Dict[str, Any]]:
     
     # Find all Java files and scan them
     for root, dirs, files in os.walk(dir_path):
+        # Filter out excluded directories
+        filter_excluded_dirs(dirs)
+        
         for file in files:
             if file.endswith('.java'):
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, dir_path)
+                
+                # Skip excluded files
+                if should_exclude_path(rel_path):
+                    continue
                 
                 try:
                     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:

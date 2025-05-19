@@ -5,9 +5,11 @@ import tempfile
 import shutil
 import zipfile
 import math
+import re
 from typing import Dict, Any, List, Optional
 import google.generativeai as genai
 from dotenv import load_dotenv
+from app.core.scan_exclusions import should_exclude_path
 
 # Load environment variables
 load_dotenv()
@@ -29,13 +31,13 @@ except Exception as e:
     logger.warning(f"Error listing models: {str(e)}")
     available_models = []
 
-# Define model to use - default to the most common Gemini model names with fallbacks
-DEFAULT_MODEL = "models/gemini-pro"
+# Define model to use - update to use current recommended models
+DEFAULT_MODEL = "models/gemini-1.5-flash"
 if not available_models:    # If we couldn't list models, use default model name
     AVAILABLE_MODEL = DEFAULT_MODEL
     logger.warning(f"No models available, using default model: {DEFAULT_MODEL}")
 else:    # Try to find a suitable Gemini model from available ones
-    preferred_models = ["gemini-pro", "gemini-1.5-pro"]
+    preferred_models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
     AVAILABLE_MODEL = DEFAULT_MODEL
     for model_name in available_models:
         for preferred in preferred_models:
@@ -152,6 +154,11 @@ def get_file_contents(path: str) -> tuple[Dict[str, str], List[str]]:
     if os.path.isfile(path):
         # Single file processing
         try:
+            # Check if file should be excluded
+            if should_exclude_path(path):
+                logger.info(f"Skipping excluded file: {path}")
+                return {}, []
+                
             _, ext = os.path.splitext(path)
             if ext in code_extensions:
                 with open(path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -162,9 +169,25 @@ def get_file_contents(path: str) -> tuple[Dict[str, str], List[str]]:
             logger.warning(f"Could not read file {path}: {str(e)}")
     else:
         # Directory processing - walk through directory
-        for root, _, files in os.walk(path):
+        for root, dirs, files in os.walk(path):
+            # Filter out excluded directories in-place
+            i = 0
+            while i < len(dirs):
+                dir_path = os.path.join(root, dirs[i])
+                if should_exclude_path(dir_path):
+                    logger.debug(f"Skipping excluded directory: {dir_path}")
+                    dirs.pop(i)
+                else:
+                    i += 1
+                    
             for file in files:
                 file_path = os.path.join(root, file)
+                
+                # Skip excluded files
+                if should_exclude_path(file_path):
+                    logger.debug(f"Skipping excluded file: {file_path}")
+                    continue
+                    
                 _, ext = os.path.splitext(file)
                 
                 if ext in code_extensions:
@@ -196,20 +219,22 @@ async def analyze_files_with_gemini(file_contents: Dict[str, str]) -> List[Dict[
     try:
         # Try to get the model
         try:
-            # Choose the right model - use the model we found during initialization
-            model = genai.GenerativeModel(AVAILABLE_MODEL)
-            logger.info(f"Successfully created GenerativeModel with {AVAILABLE_MODEL}")
+            # CRITICAL: Force the model to be gemini-1.5-flash to avoid using vision models
+            forced_model_name = "models/gemini-1.5-flash"
+            model = genai.GenerativeModel(forced_model_name)
+            logger.info(f"Using model: {forced_model_name}")
         except Exception as model_error:
-            # If that fails, fall back to a known working model
-            fallback_model = "models/gemini-pro"
-            logger.warning(f"Error creating model with {AVAILABLE_MODEL}: {str(model_error)}. Falling back to {fallback_model}")
+            # If that fails, try one more time with a simpler model name
+            fallback_model = "gemini-1.5-flash"
+            logger.warning(f"Error creating model: {str(model_error)}. Falling back to {fallback_model}")
             model = genai.GenerativeModel(fallback_model)
         
         # For each file, send it to Gemini for analysis
         for file_path, content in file_contents.items():
-            # Skip files that are too large
-            if len(content) > 30000:
-                logger.warning(f"File {file_path} is too large for Gemini analysis (> 30KB), skipping")
+            # Skip files that are too large - update max size for gemini-1.5 models (supports larger inputs)
+            max_content_size = 60000  # Increased from 30000 for the newer model
+            if len(content) > max_content_size:
+                logger.warning(f"File {file_path} is too large for Gemini analysis (> {max_content_size/1000}KB), skipping")
                 continue
                 
             # Format prompt for security analysis with clearer instructions
@@ -292,7 +317,7 @@ async def analyze_files_with_gemini(file_contents: Dict[str, str]) -> List[Dict[
                     "temperature": 0.1,  # Lower temperature for more deterministic results
                     "top_p": 0.8,
                     "top_k": 40,
-                    "max_output_tokens": 2048,
+                    "max_output_tokens": 4096,  # Increased for gemini-1.5 models
                 }
                 
                 response = await model.generate_content_async(
@@ -349,7 +374,17 @@ async def analyze_files_with_gemini(file_contents: Dict[str, str]) -> List[Dict[
                             severity = "WARNING"
                         elif floor_score <= 3 and severity != "INFO":
                             severity = "INFO"
-                                
+                        
+                        # Skip vulnerabilities related to environment variable access
+                        snippet = vuln.get("snippet", "")
+                        if snippet and (
+                            "os.getenv" in snippet or 
+                            "os.environ.get" in snippet or
+                            "os.environ[" in snippet
+                        ):
+                            logger.debug(f"Skipping environment variable access vulnerability: {snippet}")
+                            continue
+                        
                         # Add extra structure to match Semgrep output format
                         formatted_vuln = {
                             "check_id": vuln.get("check_id", "ai.security.generic"),
@@ -407,6 +442,16 @@ async def analyze_files_with_gemini(file_contents: Dict[str, str]) -> List[Dict[
                                 else:
                                     severity = "INFO"
                                 
+                                # Skip vulnerabilities related to environment variable access
+                                snippet = vuln.get("snippet", "")
+                                if snippet and (
+                                    "os.getenv" in snippet or 
+                                    "os.environ.get" in snippet or
+                                    "os.environ[" in snippet
+                                ):
+                                    logger.debug(f"Skipping environment variable access vulnerability: {snippet}")
+                                    continue
+                                    
                                 formatted_vuln = {
                                     "check_id": vuln.get("check_id", "ai.security.generic"),
                                     "path": file_path,
@@ -454,8 +499,18 @@ async def analyze_files_with_gemini(file_contents: Dict[str, str]) -> List[Dict[
                     ("admin", "Potential privileged operation", "INFO", 2)
                 ]
                 
+                # Define whitelisted patterns (safe usage that should be ignored)
+                whitelisted_patterns = [
+                    r"os\.getenv\(", 
+                    r"os\.environ\.get\("
+                ]
+                
                 lines = content.split("\n")
                 for i, line in enumerate(lines):
+                    # Check if line matches any whitelisted pattern - skip these
+                    if any(re.search(pattern, line) for pattern in whitelisted_patterns):
+                        continue
+                        
                     for pattern, msg, severity, score in vuln_patterns:
                         if pattern in line:
                             vulnerabilities.append({
