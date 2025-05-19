@@ -1,6 +1,6 @@
 rules:
   - id: maint-dead-code
-    message: Unreachable (dead) code detected
+    message: Unreachable (dead) code detection
     severity: INFO
     metadata:
       category: maintenance

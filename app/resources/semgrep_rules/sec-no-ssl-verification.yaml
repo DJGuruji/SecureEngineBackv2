@@ -1,6 +1,6 @@
 rules:
   - id: sec-no-ssl-verification
-    message: SSL/TLS certificate verification is disabled
+    message: SSL/TLS certificate verification disable detection
     severity: ERROR
     metadata:
       category: security

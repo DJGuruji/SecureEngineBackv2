@@ -1,6 +1,6 @@
 rules:
   - id: bug-null-dereference
-    message: Potential null pointer dereference detected
+    message: Potential null pointer dereference detection
     severity: WARNING
     metadata:
       category: bug

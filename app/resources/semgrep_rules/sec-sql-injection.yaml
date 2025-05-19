@@ -1,6 +1,6 @@
 rules:
   - id: sec-sql-injection
-    message: Potential SQL injection vulnerability detected
+    message: Potential SQL injection vulnerability detection
     severity: ERROR
     metadata:
       category: security

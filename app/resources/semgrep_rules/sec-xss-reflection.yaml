@@ -1,6 +1,6 @@
 rules:
   - id: sec-xss-reflection
-    message: Potential reflected XSS vulnerability detected
+    message: Potential reflected XSS vulnerability detection
     severity: ERROR
     metadata:
       category: security

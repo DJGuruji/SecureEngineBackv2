@@ -1,6 +1,6 @@
 rules:
   - id: style-unused-imports
-    message: Unused import found
+    message: Unused import detection
     severity: INFO
     metadata:
       category: style

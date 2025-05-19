@@ -1,6 +1,6 @@
 rules:
   - id: sec-open-redirect
-    message: Potential open redirect vulnerability detected
+    message: Potential open redirect vulnerability detection
     severity: WARNING
     metadata:
       category: security

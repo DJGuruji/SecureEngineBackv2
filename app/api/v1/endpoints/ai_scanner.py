@@ -18,14 +18,14 @@ async def ai_scan(file: UploadFile = File(...), user_id: str = Query("default"))
         logger.info(f"Starting Gemini AI scan for file: {file.filename}")
         start_time = time.time()
         
-        # Check and use credits (2 credits per AI scan)
+        # Check and use credits (4 credits per AI scan)
         
         # First get current credit status
         credit_info = get_user_credits(user_id)
         logger.info(f"User {user_id} has {credit_info['remaining_credits']} credits remaining")
         
         # Check if user has enough credits
-        if credit_info['remaining_credits'] < 2:
+        if credit_info['remaining_credits'] < 4:
             logger.warning(f"User {user_id} has insufficient credits for AI scan")
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -55,8 +55,8 @@ async def ai_scan(file: UploadFile = File(...), user_id: str = Query("default"))
             logger.info(f"AI Scan results stored with ID: {result_id}")
             
             # Deduct the credit for this scan AFTER successful completion
-            used_credit = use_credits_for_ai_scan(user_id, 2)
-            logger.info(f"Used 2 credits for AI scan. User {user_id} now has {used_credit['remaining_credits']} credits remaining")
+            used_credit = use_credits_for_ai_scan(user_id, 4)
+            logger.info(f"Used 4 credits for AI scan. User {user_id} now has {used_credit['remaining_credits']} credits remaining")
             
             # Add credit info to response
             scan_results["credit_info"] = {

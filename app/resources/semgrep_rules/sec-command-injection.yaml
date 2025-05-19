@@ -1,6 +1,6 @@
 rules:
   - id: sec-command-injection
-    message: Potential command injection vulnerability detected
+    message: Potential command injection vulnerability detection
     severity: ERROR
     metadata:
       category: security

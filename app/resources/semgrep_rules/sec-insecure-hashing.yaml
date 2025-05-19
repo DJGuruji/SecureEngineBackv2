@@ -1,6 +1,6 @@
 rules:
   - id: sec-insecure-hashing
-    message: Insecure hashing algorithm (MD5/SHA1) detected
+    message: Insecure hashing algorithm (MD5/SHA1) detection
     severity: ERROR
     metadata:
       category: security

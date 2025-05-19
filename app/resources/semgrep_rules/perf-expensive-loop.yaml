@@ -1,6 +1,6 @@
 rules:
   - id: perf-expensive-loop
-    message: Potentially expensive operation in loop detected
+    message: Potentially expensive operation in loop detection
     severity: WARNING
     metadata:
       category: performance
