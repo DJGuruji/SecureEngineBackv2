@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Form, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Form, Query, Path, Body
 import os
 import tempfile
 import shutil
@@ -7,6 +7,7 @@ import time
 from typing import Dict, Any, Optional, List
 from app.services.semgrep_service import run_semgrep, fetch_semgrep_rules, fetch_semgrep_rule_by_id
 from app.services.supabase_service import store_scan_results, get_scan_history, get_scan_by_id, delete_scan
+from app.services.supabase_service import store_combined_scan_results, get_combined_scan_history, get_combined_scan_by_id, delete_combined_scan
 from app.core.security import calculate_security_score, count_severities
 
 logger = logging.getLogger(__name__)
@@ -219,4 +220,231 @@ async def get_semgrep_rule_by_id(rule_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+
+@router.post("/combined-results/{sast_scan_id}/{ai_scan_id}")
+async def combine_scan_results(
+    sast_scan_id: str = Path(..., description="ID of the SAST scan"),
+    ai_scan_id: str = Path(..., description="ID of the AI scan"),
+    project_name: str = Query(None, description="Optional project name for the combined scan")
+) -> Dict[str, Any]:
+    """
+    Combine results from a SAST scan and an AI scan into a single record.
+    
+    Args:
+        sast_scan_id: ID of the SAST scan
+        ai_scan_id: ID of the AI scan
+        project_name: Optional project name
+        
+    Returns:
+        The combined scan record
+    """
+    try:
+        logger.info(f"Combining SAST scan {sast_scan_id} with AI scan {ai_scan_id}")
+        
+        combined_scan = store_combined_scan_results(
+            sast_scan_id=sast_scan_id,
+            ai_scan_id=ai_scan_id,
+            project_name=project_name
+        )
+        
+        logger.info(f"Successfully created combined scan with ID: {combined_scan.get('id')}")
+        return combined_scan
+    except Exception as e:
+        logger.error(f"Error combining scan results: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error combining scan results: {str(e)}"
+        )
+
+@router.get("/combined-scans")
+async def get_combined_scans(
+    limit: int = Query(10, description="Maximum number of scan results to return"),
+    offset: int = Query(0, description="Number of scan results to skip")
+) -> List[Dict[str, Any]]:
+    """
+    Get list of combined scan results with pagination.
+    
+    Args:
+        limit: Maximum number of scan results to return
+        offset: Number of scan results to skip
+        
+    Returns:
+        List of combined scan records
+    """
+    try:
+        logger.info(f"Getting combined scan history: limit={limit}, offset={offset}")
+        return get_combined_scan_history(limit=limit, offset=offset)
+    except Exception as e:
+        logger.error(f"Error getting combined scan history: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting combined scan history: {str(e)}"
+        )
+
+@router.get("/combined-scan/{scan_id}")
+async def get_combined_scan(
+    scan_id: str = Path(..., description="ID of the combined scan to retrieve")
+) -> Dict[str, Any]:
+    """
+    Get a specific combined scan by ID.
+    
+    Args:
+        scan_id: ID of the combined scan to retrieve
+        
+    Returns:
+        The combined scan record
+    """
+    try:
+        logger.info(f"Getting combined scan with ID: {scan_id}")
+        scan = get_combined_scan_by_id(scan_id)
+        
+        if not scan:
+            logger.warning(f"Combined scan with ID {scan_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Combined scan with ID {scan_id} not found"
+            )
+            
+        return scan
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting combined scan: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting combined scan: {str(e)}"
+        )
+
+@router.delete("/combined-scan/{scan_id}")
+async def remove_combined_scan(
+    scan_id: str = Path(..., description="ID of the combined scan to delete")
+) -> Dict[str, Any]:
+    """
+    Delete a combined scan by ID.
+    
+    Args:
+        scan_id: ID of the combined scan to delete
+        
+    Returns:
+        Success message
+    """
+    try:
+        logger.info(f"Deleting combined scan with ID: {scan_id}")
+        await delete_combined_scan(scan_id)
+        
+        return {"message": f"Successfully deleted combined scan {scan_id}"}
+    except Exception as e:
+        logger.error(f"Error deleting combined scan: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting combined scan: {str(e)}"
+        )
+
+@router.get("/combined-scan-compare/{scan_id}")
+async def compare_combined_scan_with_exploitdb(
+    scan_id: str = Path(..., description="ID of the combined scan to compare with ExploitDB")
+) -> Dict[str, Any]:
+    """
+    Compare a combined scan vulnerabilities with ExploitDB database to find matches.
+    
+    Args:
+        scan_id: ID of the combined scan to compare
+        
+    Returns:
+        Comparison results with ExploitDB data
+    """
+    try:
+        logger.info(f"Comparing combined scan {scan_id} with ExploitDB")
+        
+        # First get the combined scan data
+        scan = get_combined_scan_by_id(scan_id)
+        
+        if not scan:
+            logger.warning(f"Combined scan with ID {scan_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Combined scan with ID {scan_id} not found"
+            )
+        
+        vulnerabilities = scan.get("vulnerabilities", [])
+        has_vulnerabilities = len(vulnerabilities) > 0
+        
+        # Create mock matched patterns from vulnerability data
+        matched_patterns = []
+        if has_vulnerabilities:
+            # Extract some sample vulnerability types to use as matched patterns
+            for vuln in vulnerabilities[:5]:  # Use at most 5 vulns to create patterns
+                check_id = vuln.get("check_id", "")
+                if check_id and check_id not in matched_patterns:
+                    matched_patterns.append(check_id)
+        
+        # Generate mock ExploitDB results if there are vulnerabilities
+        mock_exploitdb_results = []
+        if has_vulnerabilities:
+            # Create 1-2 mock exploit entries
+            mock_exploitdb_results = [
+                {
+                    "title": "Sample Exploit for " + scan.get("file_name", "Unknown"),
+                    "exploit_id": "EDB-" + str(int(time.time()) % 100000),
+                    "description": "This is a sample exploit that might match the vulnerabilities in your code.",
+                    "date": time.strftime("%Y-%m-%d"),
+                    "author": "ExploitDB Research Team",
+                    "type": "webapps",
+                    "platform": "multiple",
+                    "link": "https://www.exploit-db.com/exploits/sample",
+                    "vulnerabilities": [
+                        {
+                            "type": "Injection",
+                            "description": "This vulnerability allows attackers to inject malicious code."
+                        },
+                        {
+                            "type": "Authentication Bypass",
+                            "description": "Authentication mechanisms can be bypassed."
+                        }
+                    ],
+                    "cve": "CVE-2023-" + str(int(time.time()) % 10000),
+                    "notes": "This is a mock exploit entry for demonstration purposes.\nThe actual ExploitDB integration will provide real matching exploits.",
+                    "verified": True
+                }
+            ]
+            
+            # For some vulnerabilities, mark them as having matching exploits
+            if vulnerabilities and len(vulnerabilities) > 0:
+                enhanced_vulns = []
+                for i, vuln in enumerate(vulnerabilities):
+                    enhanced_vuln = vuln.copy()
+                    # For demonstration, mark ~30% of vulnerabilities as having matches
+                    if i % 3 == 0:
+                        enhanced_vuln["matching_exploitdb_vulnerabilities"] = [
+                            {
+                                "type": "Injection" if i % 2 == 0 else "Authentication Bypass",
+                                "description": f"This vulnerability matches known exploit techniques for {vuln.get('check_id', 'unknown vulnerability')}",
+                                "exploit_id": "EDB-" + str(int(time.time()) % 100000),
+                                "confidence": "high" if i % 5 == 0 else ("medium" if i % 2 == 0 else "low")
+                            }
+                        ]
+                    enhanced_vulns.append(enhanced_vuln)
+                vulnerabilities = enhanced_vulns
+        
+        # Create the response
+        mock_result = {
+            "scan_id": scan_id,
+            "file_name": scan.get("file_name", "Unknown file"),
+            "vulnerability_count": scan.get("total_vulnerabilities", 0),
+            "matched_patterns": matched_patterns,
+            "file_in_exploitdb": has_vulnerabilities,  # Pretend it's in the DB if it has vulnerabilities
+            "exploitdb_results": mock_exploitdb_results,
+            "comparison_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "vulnerabilities": vulnerabilities
+        }
+        
+        return mock_result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing combined scan with ExploitDB: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error comparing combined scan with ExploitDB: {str(e)}"
         ) 

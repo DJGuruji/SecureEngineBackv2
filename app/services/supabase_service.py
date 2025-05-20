@@ -1,5 +1,5 @@
 from supabase import create_client
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 from fastapi import HTTPException, status
 from app.core.config import get_settings
@@ -116,9 +116,66 @@ def store_scan_results(data: Dict[str, Any]) -> Dict[str, Any]:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to store results in database"
             )
-            
+        
+        scan_record = result.data[0]
         logger.info("Successfully stored results in Supabase")
-        return result.data[0]
+        
+        # Check if this is a "Combined SAST" or "AI" scan to also store in combined_scans
+        scan_type = scan_data.get("scan_metadata", {}).get("scan_type")
+        if scan_type in ["Combined SAST", "AI"]:
+            logger.info(f"Detected {scan_type} scan, also storing in combined_scans table")
+            
+            # Store in project-record format
+            project_name = f"Project-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+            
+            if scan_type == "Combined SAST":
+                # If it's a SAST scan, store it with empty AI fields
+                combined_data = {
+                    "project_name": project_name,
+                    "scan_timestamp": scan_data.get("scan_timestamp"),
+                    "sast_scan_id": scan_record["id"],
+                    "file_name": scan_data.get("file_name"),
+                    "vulnerabilities": scan_data.get("vulnerabilities", []),
+                    "severity_count": scan_data.get("severity_count", {}),
+                    "total_vulnerabilities": scan_data.get("total_vulnerabilities", 0),
+                    "security_score": scan_data.get("security_score", 5),
+                    "scan_status": "completed",
+                    "scan_duration": scan_data.get("scan_duration", 0),
+                    "scan_metadata": {
+                        "scan_type": "combined sast",
+                        "sast_metadata": scan_data.get("scan_metadata", {}),
+                        "source": "auto_combined"
+                    }
+                }
+            elif scan_type == "AI":
+                # If it's an AI scan, store it with empty SAST fields
+                combined_data = {
+                    "project_name": project_name,
+                    "scan_timestamp": scan_data.get("scan_timestamp"),
+                    "ai_scan_id": scan_record["id"],
+                    "file_name": scan_data.get("file_name"),
+                    "vulnerabilities": scan_data.get("vulnerabilities", []),
+                    "severity_count": scan_data.get("severity_count", {}),
+                    "total_vulnerabilities": scan_data.get("total_vulnerabilities", 0),
+                    "security_score": scan_data.get("security_score", 5),
+                    "scan_status": "completed",
+                    "scan_duration": scan_data.get("scan_duration", 0),
+                    "scan_metadata": {
+                        "scan_type": "AI",
+                        "ai_metadata": scan_data.get("scan_metadata", {}),
+                        "source": "auto_combined"
+                    }
+                }
+            
+            try:
+                combined_result = supabase.table("combined_scans").insert(combined_data).execute()
+                if combined_result.data:
+                    logger.info(f"Successfully stored {scan_type} scan in combined_scans table")
+            except Exception as e:
+                logger.error(f"Error storing in combined_scans table: {str(e)}")
+                # Don't raise an exception here - we've already successfully stored in scan_history
+        
+        return scan_record
         
     except Exception as e:
         logger.error(f"Error storing results in Supabase: {str(e)}")
@@ -314,4 +371,158 @@ def add_credits(user_id: str = "default", credits_to_add: int = 10) -> Dict[str,
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error adding credits: {str(e)}"
-        ) 
+        )
+
+def store_combined_scan_results(
+    sast_scan_id: str, 
+    ai_scan_id: str, 
+    project_name: str = None
+) -> Dict[str, Any]:
+    """
+    Store combined SAST and AI scan results in a new combined_scans table.
+    
+    Args:
+        sast_scan_id: ID of the SAST scan in scan_history
+        ai_scan_id: ID of the AI scan in scan_history
+        project_name: Optional project name for grouping scans
+        
+    Returns:
+        The newly created combined scan record
+    """
+    try:
+        logger.info(f"Storing combined scan results for SAST scan {sast_scan_id} and AI scan {ai_scan_id}")
+        
+        # Fetch the individual scan records
+        sast_scan = get_scan_by_id(sast_scan_id)
+        ai_scan = get_scan_by_id(ai_scan_id)
+        
+        if not sast_scan:
+            raise ValueError(f"SAST scan with ID {sast_scan_id} not found")
+        
+        if not ai_scan:
+            raise ValueError(f"AI scan with ID {ai_scan_id} not found")
+        
+        # Calculate combined stats
+        total_vulnerabilities = (
+            sast_scan.get("total_vulnerabilities", 0) + 
+            ai_scan.get("total_vulnerabilities", 0)
+        )
+        
+        # Merge severity counts
+        sast_severity = sast_scan.get("severity_count", {})
+        ai_severity = ai_scan.get("severity_count", {})
+        
+        combined_severity = {
+            "ERROR": (sast_severity.get("ERROR", 0) + ai_severity.get("ERROR", 0)),
+            "WARNING": (sast_severity.get("WARNING", 0) + ai_severity.get("WARNING", 0)),
+            "INFO": (sast_severity.get("INFO", 0) + ai_severity.get("INFO", 0))
+        }
+        
+        # Calculate weighted security score (average of both scores)
+        sast_score = sast_scan.get("security_score", 5)
+        ai_score = ai_scan.get("security_score", 5)
+        combined_score = (sast_score + ai_score) / 2
+        
+        # Combine all vulnerabilities
+        all_vulnerabilities = (
+            sast_scan.get("vulnerabilities", []) + 
+            ai_scan.get("vulnerabilities", [])
+        )
+        
+        # Create combined scan record
+        combined_scan = {
+            "project_name": project_name or f"Project-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+            "scan_timestamp": datetime.utcnow().isoformat(),
+            "sast_scan_id": sast_scan_id,
+            "ai_scan_id": ai_scan_id,
+            "file_name": sast_scan.get("file_name"),
+            "vulnerabilities": all_vulnerabilities,
+            "severity_count": combined_severity,
+            "total_vulnerabilities": total_vulnerabilities,
+            "security_score": round(combined_score, 1),
+            "scan_status": "completed",
+            "scan_duration": (
+                sast_scan.get("scan_duration", 0) + 
+                ai_scan.get("scan_duration", 0)
+            ),
+            "scan_metadata": {
+                "scan_type": "SAST & AI",
+                "sast_metadata": sast_scan.get("scan_metadata", {}),
+                "ai_metadata": ai_scan.get("scan_metadata", {})
+            }
+        }
+        
+        # Store in combined_scans table
+        result = supabase.table("combined_scans").insert(combined_scan).execute()
+        
+        if not result.data:
+            logger.error("Failed to store combined scan results: No data returned")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to store combined scan results in database"
+            )
+            
+        logger.info("Successfully stored combined scan results")
+        return result.data[0]
+        
+    except ValueError as ve:
+        logger.error(f"Error storing combined scan results: {str(ve)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.error(f"Error storing combined scan results: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+def get_combined_scan_history(limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+    """Retrieve combined scan history with pagination."""
+    try:
+        result = supabase.table("combined_scans") \
+            .select("*") \
+            .order("scan_timestamp", desc=True) \
+            .limit(limit) \
+            .offset(offset) \
+            .execute()
+        return result.data
+    except Exception as e:
+        logger.error(f"Error retrieving combined scan history: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving combined scan history: {str(e)}"
+        )
+
+def get_combined_scan_by_id(scan_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve a specific combined scan by ID."""
+    try:
+        result = supabase.table("combined_scans") \
+            .select("*") \
+            .eq("id", scan_id) \
+            .execute()
+            
+        if not result.data or len(result.data) == 0:
+            return None
+            
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error retrieving combined scan: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving combined scan: {str(e)}"
+        )
+
+async def delete_combined_scan(scan_id: str) -> None:
+    """Delete a combined scan record from Supabase."""
+    try:
+        # Delete the scan record
+        response = supabase.table("combined_scans").delete().eq("id", scan_id).execute()
+        
+        # Log success - we don't need to check if anything was deleted since
+        # the API already returns 200 OK for successful operations even if no records matched
+        logger.info(f"Successfully executed deletion for combined scan {scan_id}")
+    except Exception as e:
+        logger.error(f"Error deleting combined scan from Supabase: {str(e)}")
+        raise 
