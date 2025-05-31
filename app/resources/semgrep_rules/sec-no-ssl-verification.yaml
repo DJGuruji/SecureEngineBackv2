@@ -1,0 +1,82 @@
+rules:
+  - id: sec-no-ssl-verification
+    message: SSL/TLS certificate verification disable detection
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: insecure-transport
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: "CWE-295: Improper Certificate Validation"
+      owasp: "A3:2017 - Sensitive Data Exposure"
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+      - go
+      - ruby
+    patterns:
+      - pattern-either:
+        # Python requests
+        - pattern: |
+            requests.$FUNC(..., verify=False, ...)
+        - pattern: |
+            requests.Session().verify = False
+        - pattern: |
+            session.verify = False
+        # Python urllib3
+        - pattern: |
+            urllib3.disable_warnings()
+        - pattern: |
+            urllib3.disable_warnings($PARAM)
+        - pattern: |
+            $CONTEXT = ssl._create_unverified_context()
+        - pattern: |
+            ssl._create_default_https_context = ssl._create_unverified_context
+        # Node.js https and request
+        - pattern: |
+            $HTTPS.request($OPTS, ...)
+          metavariable-pattern:
+            metavariable: $OPTS
+            patterns:
+              - pattern-inside: |
+                  { ..., rejectUnauthorized: false, ... }
+        - pattern: |
+            $REQ($OPTS, ...)
+          metavariable-pattern:
+            metavariable: $OPTS
+            patterns:
+              - pattern-inside: |
+                  { ..., rejectUnauthorized: false, ... }
+              - pattern-inside: |
+                  { ..., strictSSL: false, ... }
+        # Node.js axios
+        - pattern: |
+            axios.create({
+              ...,
+              httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+              ...
+            })
+        - pattern: |
+            $AGENT = new https.Agent({ ..., rejectUnauthorized: false, ... })
+        # Go
+        - pattern: |
+            &tls.Config{..., InsecureSkipVerify: true, ...}
+        # Java
+        - pattern: |
+            SSLContext.getInstance("SSL").init(null, new TrustManager[] { $VAR }, null)
+          metavariable-pattern:
+            metavariable: $VAR
+            patterns:
+              - pattern-inside: |
+                  new X509TrustManager() {
+                    ...
+                    public void checkServerTrusted(...) {
+                      ...
+                    }
+                    ...
+                  }
+    fix: |
+      // Always validate certificates in production code
+      // Example: requests.get(url, verify=True) 

@@ -1,0 +1,99 @@
+rules:
+  - id: sec-insecure-hashing
+    message: Insecure hashing algorithm (MD5/SHA1) detection
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: crypto
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      owasp: "A3:2017 - Sensitive Data Exposure"
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+      - go
+      - php
+      - ruby
+      - csharp
+    patterns:
+      - pattern-either:
+        # Python hashlib
+        - pattern: |
+            hashlib.md5(...)
+        - pattern: |
+            hashlib.sha1(...)
+        - pattern: |
+            $VAR = hashlib.new("md5", ...)
+        - pattern: |
+            $VAR = hashlib.new("sha1", ...)
+        # Python django
+        - pattern: |
+            from django.contrib.auth.hashers import MD5PasswordHasher
+        - pattern: |
+            from django.contrib.auth.hashers import SHA1PasswordHasher
+        # JavaScript/TypeScript crypto
+        - pattern: |
+            crypto.createHash("md5")
+        - pattern: |
+            crypto.createHash("sha1")
+        - pattern: |
+            crypto.createHash('md5')
+        - pattern: |
+            crypto.createHash('sha1')
+        # Node.js crypto-js
+        - pattern: |
+            CryptoJS.MD5(...)
+        - pattern: |
+            CryptoJS.SHA1(...)
+        # Java MessageDigest
+        - pattern: |
+            MessageDigest.getInstance("MD5")
+        - pattern: |
+            MessageDigest.getInstance("SHA-1")
+        - pattern: |
+            MessageDigest.getInstance("SHA1")
+        # Go crypto
+        - pattern: |
+            md5.New()
+        - pattern: |
+            md5.Sum(...)
+        - pattern: |
+            sha1.New()
+        - pattern: |
+            sha1.Sum(...)
+        # PHP hash
+        - pattern: |
+            hash("md5", ...)
+        - pattern: |
+            hash("sha1", ...)
+        - pattern: |
+            md5(...)
+        - pattern: |
+            sha1(...)
+        # Ruby Digest
+        - pattern: |
+            Digest::MD5.hexdigest(...)
+        - pattern: |
+            Digest::SHA1.hexdigest(...)
+        # C# MD5/SHA1
+        - pattern: |
+            MD5.Create()
+        - pattern: |
+            SHA1.Create()
+        - pattern: |
+            new MD5CryptoServiceProvider()
+        - pattern: |
+            new SHA1CryptoServiceProvider()
+      - pattern-not-inside: |
+          // test
+      - pattern-not-inside: |
+          /* test */
+      - pattern-not-inside: |
+          # test
+    fix: |
+      // Use stronger hashing algorithms like SHA-256 or better
+      // Example:
+      // hashlib.sha256(...) 

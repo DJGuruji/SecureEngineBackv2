@@ -1,0 +1,75 @@
+rules:
+  - id: sec-xss-reflection
+    message: Potential reflected XSS vulnerability detection
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: xss
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: "CWE-79: Improper Neutralization of Input During Web Page Generation"
+      owasp: "A7:2017 - Cross-Site Scripting (XSS)"
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+      - php
+    patterns:
+      - pattern-either:
+        # Python Flask patterns
+        - pattern: |
+            @app.route("...")
+            def $FUNC(...):
+              ...
+              return render_template(..., $VAR=$REQUEST.$METHOD(...), ...)
+        - pattern: |
+            return render_template(..., $VAR=request.$METHOD(...), ...)
+        - pattern: |
+            return render_template_string(..., $VAR=request.$METHOD(...), ...)
+        - pattern: |
+            return f"...{request.$METHOD(...)}..."
+        # Python Django patterns
+        - pattern: |
+            def $FUNC(...):
+              ...
+              return HttpResponse(f"...{$REQUEST.$METHOD(...)}...")
+        - pattern: |
+            return render(..., {'$VAR': request.$METHOD(...)}, ...)
+        # JavaScript/Node.js patterns (Express)
+        - pattern: |
+            app.$METHOD("...", function(req, res) {
+              ...
+              res.send("..." + req.query.$PARAM + "...")
+              ...
+            })
+        - pattern: |
+            app.$METHOD("...", function(req, res) {
+              ...
+              res.send(`...${req.query.$PARAM}...`)
+              ...
+            })
+        - pattern: |
+            res.send("..." + req.params.$PARAM + "...")
+        - pattern: |
+            res.send(`...${req.params.$PARAM}...`)
+        # PHP patterns
+        - pattern: |
+            echo "..." . $_GET[$PARAM] . "..."
+        - pattern: |
+            echo "..." . $_POST[$PARAM] . "..."
+        - pattern: |
+            echo "..." . $_REQUEST[$PARAM] . "..."
+        - pattern: |
+            print("..." . $_GET[$PARAM] . "...")
+        - pattern: |
+            print("..." . $_POST[$PARAM] . "...")
+        - pattern: |
+            print("..." . $_REQUEST[$PARAM] . "...")
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: (get|cookies|form|args|params|values|json)
+    fix: |
+      // Always use context-appropriate escaping
+      // Example for Python Flask:
+      // return render_template('index.html', data=escape(request.args.get('input'))) 

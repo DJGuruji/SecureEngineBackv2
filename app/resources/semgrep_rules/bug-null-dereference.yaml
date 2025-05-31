@@ -1,0 +1,91 @@
+rules:
+  - id: bug-null-dereference
+    message: Potential null pointer dereference detection
+    severity: WARNING
+    metadata:
+      category: bug
+      subcategory: null-dereference
+      impact: MEDIUM
+      likelihood: MEDIUM
+      cwe: "CWE-476: NULL Pointer Dereference"
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+      - c
+      - cpp
+      - csharp
+      - go
+    patterns:
+      - pattern-either:
+        # Python patterns - accessing attributes after None check
+        - pattern: |
+            if $X == None:
+              ...
+            $X.$MEMBER
+        - pattern: |
+            if $X is None:
+              ...
+            $X.$MEMBER
+        - pattern: |
+            if not $X:
+              ...
+            $X.$MEMBER
+        # JavaScript/TypeScript patterns
+        - pattern: |
+            if ($X === null) {
+              ...
+            }
+            $X.$MEMBER
+        - pattern: |
+            if ($X === null || $X === undefined) {
+              ...
+            }
+            $X.$MEMBER
+        - pattern: |
+            if (!$X) {
+              ...
+            }
+            $X.$MEMBER
+        # Java patterns
+        - pattern: |
+            if ($X == null) {
+              ...
+            }
+            $X.$MEMBER
+        # C/C++ patterns
+        - pattern: |
+            if ($X == NULL) {
+              ...
+            }
+            $X->$MEMBER
+        - pattern: |
+            if (!$X) {
+              ...
+            }
+            $X->$MEMBER
+        # C# patterns
+        - pattern: |
+            if ($X == null) {
+              ...
+            }
+            $X.$MEMBER
+        # Go patterns
+        - pattern: |
+            if $X == nil {
+              ...
+            }
+            $X.$MEMBER
+      - pattern-not-inside: |
+          try {
+            ...
+          } catch (...) {
+            ...
+          }
+    fix: |
+      // Add appropriate null checks before dereferencing
+      // Example:
+      // if (x != null) {
+      //    x.method();
+      // } 

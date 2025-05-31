@@ -1,0 +1,85 @@
+rules:
+  - id: sec-command-injection
+    message: Potential command injection vulnerability detection
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: command-injection
+      impact: HIGH
+      likelihood: HIGH
+      cwe: "CWE-78: OS Command Injection"
+      owasp: "A1:2017 - Injection"
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+      - php
+      - ruby
+      - go
+    patterns:
+      - pattern-either:
+        # Python patterns
+        - pattern: |
+            os.system("..."+$VAR+"...")
+        - pattern: |
+            os.system("..." + $VAR + "...")
+        - pattern: |
+            os.system(f"...{$VAR}...")
+        - pattern: |
+            subprocess.Popen("..."+$VAR+"...", shell=True)
+        - pattern: |
+            subprocess.Popen("..." + $VAR + "...", shell=True)
+        - pattern: |
+            subprocess.Popen(f"...{$VAR}...", shell=True)
+        - pattern: |
+            subprocess.call("..."+$VAR+"...", shell=True)
+        - pattern: |
+            subprocess.call("..." + $VAR + "...", shell=True)
+        - pattern: |
+            subprocess.call(f"...{$VAR}...", shell=True)
+        - pattern: |
+            subprocess.run("..."+$VAR+"...", shell=True)
+        - pattern: |
+            subprocess.run("..." + $VAR + "...", shell=True)
+        - pattern: |
+            subprocess.run(f"...{$VAR}...", shell=True)
+        # JavaScript/TypeScript patterns
+        - pattern: |
+            child_process.exec("..."+$VAR+"...")
+        - pattern: |
+            child_process.exec("..." + $VAR + "...")
+        - pattern: |
+            child_process.exec(`...${$VAR}...`)
+        - pattern: |
+            execSync("..."+$VAR+"...")
+        - pattern: |
+            execSync("..." + $VAR + "...")
+        - pattern: |
+            execSync(`...${$VAR}...`)
+        # PHP patterns
+        - pattern: |
+            shell_exec("..."+$VAR+"...")
+        - pattern: |
+            shell_exec("..." . $VAR . "...")
+        - pattern: |
+            exec("..."+$VAR+"...")
+        - pattern: |
+            exec("..." . $VAR . "...")
+        - pattern: |
+            system("..."+$VAR+"...")
+        - pattern: |
+            system("..." . $VAR . "...")
+        # Java patterns
+        - pattern: |
+            Runtime.getRuntime().exec("..."+$VAR+"...")
+        - pattern: |
+            Runtime.getRuntime().exec("..." + $VAR + "...")
+        # Go patterns
+        - pattern: |
+            exec.Command("sh", "-c", "..."+$VAR+"...")
+        - pattern: |
+            exec.Command("sh", "-c", "..." + $VAR + "...")
+    fix: |
+      // Use array form for commands and arguments
+      // Example: subprocess.run(["ls", user_dir], shell=False) 

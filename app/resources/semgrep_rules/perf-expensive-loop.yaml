@@ -1,0 +1,116 @@
+rules:
+  - id: perf-expensive-loop
+    message: Potentially expensive operation in loop detection
+    severity: WARNING
+    metadata:
+      category: performance
+      subcategory: inefficient-loop
+      impact: MEDIUM
+      likelihood: MEDIUM
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+    patterns:
+      - pattern-either:
+        # Python patterns
+        - pattern: |
+            for $ITEM in $COLLECTION:
+              ...
+              $COLLECTION.append(...)
+              ...
+        - pattern: |
+            for $ITEM in $COLLECTION:
+              ...
+              $COLLECTION.insert(...)
+              ...
+        - pattern: |
+            for $ITEM in $COLLECTION:
+              ...
+              $COLLECTION.remove(...)
+              ...
+        - pattern: |
+            for $I in range(len($LIST)):
+              ...
+              $LIST.pop(...)
+              ...
+        - pattern: |
+            for $I in range(len($LIST)):
+              ...
+              $LIST.append(...)
+              ...
+        # JavaScript/TypeScript patterns
+        - pattern: |
+            for (let $I = 0; $I < $ARRAY.length; $I++) {
+              ...
+              $ARRAY.push(...)
+              ...
+            }
+        - pattern: |
+            for (let $I = 0; $I < $ARRAY.length; $I++) {
+              ...
+              $ARRAY.unshift(...)
+              ...
+            }
+        - pattern: |
+            for (let $I = 0; $I < $ARRAY.length; $I++) {
+              ...
+              $ARRAY.splice(...)
+              ...
+            }
+        - pattern: |
+            for (let $I = 0; $I < $ARRAY.length; $I++) {
+              ...
+              $ARRAY.shift(...)
+              ...
+            }
+        - pattern: |
+            for (let $I = 0; $I < $ARRAY.length; $I++) {
+              ...
+              $ARRAY.pop(...)
+              ...
+            }
+        # Java patterns
+        - pattern: |
+            for (int $I = 0; $I < $LIST.size(); $I++) {
+              ...
+              $LIST.add(...)
+              ...
+            }
+        - pattern: |
+            for (int $I = 0; $I < $LIST.size(); $I++) {
+              ...
+              $LIST.remove(...)
+              ...
+            }
+        # Database operations in loops
+        - pattern: |
+            for $VAR in $COLLECTION:
+              ...
+              $DB.query(...)
+              ...
+        - pattern: |
+            for $VAR in $COLLECTION:
+              ...
+              $DB.execute(...)
+              ...
+        - pattern: |
+            for (let $I = 0; $I < $ARRAY.length; $I++) {
+              ...
+              $DB.query(...)
+              ...
+            }
+        - pattern: |
+            for (int $I = 0; $I < $LIST.size(); $I++) {
+              ...
+              $DB.executeQuery(...)
+              ...
+            }
+    fix: |
+      // Consider batch operations or more efficient data structures
+      // Example: 
+      // results = []
+      // for item in collection:
+      //   results.append(process(item))
+      // db.execute_many(results) 

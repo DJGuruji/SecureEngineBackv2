@@ -1,0 +1,96 @@
+rules:
+  - id: style-unused-imports
+    message: Unused import detection
+    severity: INFO
+    metadata:
+      category: style
+      subcategory: unused-imports
+      impact: LOW
+      likelihood: HIGH
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+    patterns:
+      - pattern-either:
+        # Python unused import
+        - pattern: |
+            import $MODULE
+          metavariable-regex:
+            metavariable: $MODULE
+            regex: .*
+          pattern-not-inside: |
+            import $MODULE
+            ...
+            $MODULE.$ANYTHING
+        - pattern: |
+            from $MODULE import $IMPORT
+          metavariable-regex:
+            metavariable: $IMPORT
+            regex: .*
+          pattern-not-inside: |
+            from $MODULE import $IMPORT
+            ...
+            $IMPORT
+        # JavaScript/TypeScript unused imports
+        - pattern: |
+            import $IMPORT from "$MODULE"
+          metavariable-regex:
+            metavariable: $IMPORT
+            regex: .*
+          pattern-not-inside: |
+            import $IMPORT from "$MODULE"
+            ...
+            $IMPORT
+        - pattern: |
+            import { $IMPORT } from "$MODULE"
+          metavariable-regex:
+            metavariable: $IMPORT
+            regex: .*
+          pattern-not-inside: |
+            import { $IMPORT } from "$MODULE"
+            ...
+            $IMPORT
+        - pattern: |
+            import * as $IMPORT from "$MODULE"
+          metavariable-regex:
+            metavariable: $IMPORT
+            regex: .*
+          pattern-not-inside: |
+            import * as $IMPORT from "$MODULE"
+            ...
+            $IMPORT
+        # Java unused imports
+        - pattern: |
+            import $PACKAGE.$CLASS;
+          metavariable-regex:
+            metavariable: $CLASS
+            regex: .*
+          pattern-not-inside: |
+            import $PACKAGE.$CLASS;
+            ...
+            $CLASS
+        - pattern: |
+            import static $PACKAGE.$CLASS.$METHOD;
+          metavariable-regex:
+            metavariable: $METHOD
+            regex: .*
+          pattern-not-inside: |
+            import static $PACKAGE.$CLASS.$METHOD;
+            ...
+            $METHOD
+      - pattern-not-inside: |
+          // ...
+      - pattern-not-inside: |
+          /* ... */
+      - pattern-not-inside: |
+          # ...
+      - pattern-not-inside: |
+          """ ... """
+      - pattern-not-inside: |
+          ''' ... '''
+    fix: |
+      // Remove unused imports
+      // Example:
+      // Remove the line: import module_name 

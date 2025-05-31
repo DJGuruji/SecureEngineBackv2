@@ -1,0 +1,87 @@
+rules:
+  - id: maint-dead-code
+    message: Unreachable (dead) code detection
+    severity: INFO
+    metadata:
+      category: maintenance
+      subcategory: dead-code
+      impact: LOW
+      likelihood: MEDIUM
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+      - csharp
+      - go
+      - php
+      - ruby
+    patterns:
+      - pattern-either:
+        # Code after return
+        - pattern: |
+            return $X
+            $EXPR
+        - pattern: |
+            return;
+            $EXPR
+        # Code after break or continue in loops
+        - pattern: |
+            break;
+            $EXPR
+        - pattern: |
+            continue;
+            $EXPR
+        # Code after throws/raise
+        - pattern: |
+            throw $X;
+            $EXPR
+        - pattern: |
+            raise $X
+            $EXPR
+        # Unreachable conditions (always true/false)
+        - pattern: |
+            if (true) {
+              $X
+            } else {
+              $Y
+            }
+        - pattern: |
+            if (false) {
+              $X
+            }
+        - pattern: |
+            if True:
+              $X
+            else:
+              $Y
+        - pattern: |
+            if False:
+              $X
+        # Redundant if checks
+        - pattern: |
+            if ($COND) {
+              return true;
+            } else {
+              return true;
+            }
+        - pattern: |
+            if $COND:
+              return True
+            else:
+              return True
+      - pattern-not-inside: |
+          // ...
+      - pattern-not-inside: |
+          /* ... */
+      - pattern-not-inside: |
+          # ...
+      - pattern-not-inside: |
+          """ ... """
+      - pattern-not-inside: |
+          ''' ... '''
+    fix: |
+      // Remove unreachable code
+      // Example:
+      // return result;
+      // (remove code here) 

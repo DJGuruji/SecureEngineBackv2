@@ -1,0 +1,52 @@
+rules:
+  - id: sec-sql-injection
+    message: Potential SQL injection vulnerability detection
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: sql-injection
+      impact: HIGH
+      likelihood: HIGH
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A1:2017 - Injection"
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+      - php
+      - ruby
+    patterns:
+      - pattern-either:
+        # Python string concatenation in SQL queries
+        - pattern: |
+            $CURSOR.execute("..."+$VAR+"...")
+        - pattern: |
+            $CURSOR.execute("..." + $VAR + "...")
+        - pattern: |
+            $CURSOR.execute(f"...{$VAR}...")
+        # JavaScript/TypeScript patterns
+        - pattern: |
+            $DB.query("..."+$VAR+"...")
+        - pattern: |
+            $DB.query("..." + $VAR + "...")
+        - pattern: |
+            $DB.query(`...${$VAR}...`)
+        # PHP patterns
+        - pattern: |
+            mysqli_query($CONN, "..."+$VAR+"...")
+        - pattern: |
+            mysqli_query($CONN, "..." . $VAR . "...")
+        # Java patterns
+        - pattern: |
+            $STMT.executeQuery("..."+$VAR+"...")
+        - pattern: |
+            $STMT.executeQuery("..." + $VAR + "...")
+        # Ruby patterns
+        - pattern: |
+            $DB.execute("..."+$VAR+"...")
+        - pattern: |
+            $DB.execute("..." + $VAR + "...")
+    fix: |
+      // Use parameterized queries/prepared statements
+      // Example: cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,)) 

@@ -1,0 +1,57 @@
+rules:
+  - id: sec-open-redirect
+    message: Potential open redirect vulnerability detection
+    severity: WARNING
+    metadata:
+      category: security
+      subcategory: open-redirect
+      impact: MEDIUM
+      likelihood: MEDIUM
+      cwe: "CWE-601: URL Redirection to Untrusted Site"
+      owasp: "A1:2017 - Injection"
+    languages:
+      - python
+      - javascript
+      - typescript
+      - java
+      - php
+    patterns:
+      - pattern-either:
+        # Python Flask redirect
+        - pattern: |
+            redirect($REQUEST.$METHOD("..."), ...)
+        - pattern: |
+            return redirect($REQUEST.$METHOD("..."), ...)
+        # Python Django redirect
+        - pattern: |
+            HttpResponseRedirect($REQUEST.$METHOD("..."))
+        - pattern: |
+            return HttpResponseRedirect($REQUEST.$METHOD("..."))
+        # Node.js Express redirect
+        - pattern: |
+            res.redirect($REQ.query.$PARAM)
+        - pattern: |
+            res.redirect($REQ.params.$PARAM)
+        - pattern: |
+            res.redirect($REQ.body.$PARAM)
+        # PHP header redirect
+        - pattern: |
+            header("Location: " . $_GET[$PARAM])
+        - pattern: |
+            header("Location: " . $_POST[$PARAM])
+        - pattern: |
+            header("Location: " . $_REQUEST[$PARAM])
+        # Spring redirect
+        - pattern: |
+            return "redirect:" + $REQUEST.getParameter("...")
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: (get|cookies|form|args|params|values|json)
+          metavariable: $PARAM
+          regex: (url|redirect|next|target|destination|return|returnTo|returnUrl|return_url|goto|go)
+    fix: |
+      // Validate redirects using a whitelist or URL validation
+      // Example: 
+      // allowed_domains = ['example.com', 'subdomain.example.com']
+      // if is_valid_redirect(url, allowed_domains):
+      //     return redirect(url) 
